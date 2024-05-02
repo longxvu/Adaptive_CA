@@ -1,0 +1,6 @@
+.api_key
+question_gen.ipynb
+testing.ipynb
+.ipynb_checkpoints
+.idea
+__pycache__/
