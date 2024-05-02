@@ -29,7 +29,8 @@ def get_api_key():
         shell = get_ipython().__class__.__module__
         print(shell)
         if shell == "google.colab._shell":
-            pass
+            from google.colab import userdata
+            return userdata.get("OPENAI_API_KEY")
     except NameError:
         # Probably standard interpreter
         pass
