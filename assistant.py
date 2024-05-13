@@ -25,6 +25,16 @@ class GPTAssistant:
         # New assistant is basically old assistant but new thread, can rewrite this one maybe
         self.thread = self.client.beta.threads.create()
         self.last_run = None
+        self.function_map = {
+            "display_quiz": {
+                "function": self.display_quiz,
+                "arguments": ["title", "questions"]
+            },
+            "generate_feedback": {
+                "function": self.display_feedback,
+                "arguments": ["evaluation"]
+            }
+        }
 
     def submit_message(self, message):
         self.client.beta.threads.messages.create(
@@ -76,24 +86,29 @@ class GPTAssistant:
         self.wait_on_run()
         assert self.run_requires_action()
         all_tool_outputs = []
+        action_items = {}
         for tool_call in self.last_run.required_action.submit_tool_outputs.tool_calls:
             # Different tool requires different tool output maybe
-            name = tool_call.function.name  # TODO: maybe using name to match our defined function
+            name = tool_call.function.name
+            required_function = self.function_map[name]["function"]
             arguments = json.loads(tool_call.function.arguments)
-            # print(name)
+            print(f"Calling: {name}")
             # print(arguments)
-            responses = self.display_quiz(arguments["title"], arguments["questions"])   # TODO shouldn't be hard coded
+            # Extracting required arguments from an arbitrary defined function. Need to define it in self.function_map
+            arguments = [arguments[key] for key in self.function_map[name]["arguments"]]
+            responses = required_function(*arguments)
             # print(responses)
             all_tool_outputs.append({
                 "tool_call_id": tool_call.id,
                 "output": json.dumps(responses)
             })
+            action_items[name] = responses  # Return from each function is mapped to the function name
         self.last_run = self.client.beta.threads.runs.submit_tool_outputs(
             thread_id=self.thread.id,
             run_id=self.last_run.id,
             tool_outputs=all_tool_outputs
         )
-        return self.last_run
+        return action_items
 
     def run_not_finished(self):
         return self.last_run.status == "queued" or self.last_run.status == "in_progress"
@@ -105,12 +120,16 @@ class GPTAssistant:
         return input("Answer: ")
 
     def display_quiz(self, title, questions):
+        # print(title, questions)   # this is for debugging arguments passed by OpenAI API
         print("Quiz:", title)
         print()
+        num_q_difficulty = [0] * 3
+        diff_map = {"EASY": 0, "MEDIUM": 1, "HARD": 2}      # TODO: hardcoded
         responses = []
 
         for q in questions:
-            print(f"Questions: {q['question_text']}")
+            print(f"Questions: {q['question_text']} ({q['difficulty']} - {q['category']})")
+            num_q_difficulty[diff_map[q["difficulty"]]] += 1
             response = ""
 
             # If multiple choice, print options
@@ -125,5 +144,26 @@ class GPTAssistant:
 
             responses.append(response)
             print()
+        print(f"Student responses: {responses}")
 
-        return responses
+        return num_q_difficulty, responses
+
+    def display_feedback(self, evaluation):
+        scores = [list() for _ in range(3)]    # scores for easy, medium, hard
+        diff_map = {"EASY": 0, "MEDIUM": 1, "HARD": 2}
+        concepts = {"mastered": [], "learning": []}
+        for idx, e in enumerate(evaluation):
+            print(f"Question {idx + 1}:")
+            print(f"Student response: {e['student_response']}")
+            print(f"Feedback: {e['feedback']}")
+            print(f"Score: {e['score']}")
+            scores[diff_map[e["difficulty"]]].append(e["score"])
+            if e['score'] <= 4:
+                concepts["learning"].append(e['concept'])
+            else:
+                concepts["mastered"].append(e['concept'])
+            print()
+        # print(f"Quiz score: {sum(scores)}/{len(scores)}")
+        print(f"Mastered concepts: {concepts['mastered']}")
+        print(f"Learning concepts: {concepts['learning']}")
+        return scores, concepts

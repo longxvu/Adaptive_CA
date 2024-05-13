@@ -13,14 +13,15 @@ def load_json_response(obj):
 
 def list_all_assistant(client: OpenAI, concise=True):
     assistant_data = client.beta.assistants.list().model_dump()
-    concise_object_list = ["id", "name", "description", "instructions", "model", "tools", "temperature"]
+    concise_object_list = ["id", "name", "description", "instructions", "model", "temperature", "tools"]
     for assistant in assistant_data["data"]:
         if concise:
             for obj in concise_object_list:
                 print(f"{obj}: {assistant[obj]}")
         else:
-            print(assistant)
-        print("")
+            print(json.dumps(assistant, indent=4))
+        # Tools needs json pretty print for easier debugging
+        print("=" * 50)
 
 
 def get_api_key():
@@ -41,3 +42,16 @@ def get_api_key():
     return key
 
 
+def generate_question_configuration(num_questions, difficulty_weights=None, max_score_answer=10):
+    question_configuration = []
+    if difficulty_weights is None:
+        difficulty_weights = [2, 5, 10]  # 2 for easy, 5 for med, 10 for hard
+    for easy in range(num_questions + 1):
+        for medium in range(num_questions + 1):
+            for hard in range(num_questions + 1):
+                if easy + medium + hard == num_questions:
+                    question_configuration.append((easy, medium, hard,
+                                                   easy * difficulty_weights[0] + medium * difficulty_weights[1] +
+                                                    hard * difficulty_weights[2]))
+    question_configuration = sorted(question_configuration, key=lambda x: x[3])
+    return question_configuration
