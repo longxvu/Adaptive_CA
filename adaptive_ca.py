@@ -62,7 +62,9 @@ class AdaptiveCA:
         print(f"Question: {question}")
         self.tts_client.text_to_speech(question)
         # answer = input("Answer: ")
-        answer = self.stt_client.speech_to_text(5)[0]
+        answer = self.stt_client.speech_to_text(5)
+        if answer:
+            answer = answer[0]
         print(f"Child's recorded answer: {answer}")
         return answer
 
