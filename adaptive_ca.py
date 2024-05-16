@@ -1,3 +1,4 @@
+import os
 from openai import OpenAI
 from assistant import GPTAssistant
 import pandas as pd
@@ -5,8 +6,9 @@ import utils
 from tool_functions import (generate_feedback_pretest_function_json, generate_question_function_json,
                             generate_feedback_function_json, simplify_question_function_json)
 
-from speech_text.TTS import TTSClient
-from speech_text.STT import STTClient
+from multimedia.TTS import TTSClient
+from multimedia.STT import STTClient
+from multimedia.video_player import VideoPlayer
 
 
 class AdaptiveCA:
@@ -17,12 +19,15 @@ class AdaptiveCA:
         self.assistant = GPTAssistant(self.client, assistant_id)
         self.tts_client = TTSClient(tts_private_key_path="keys/tts-private-key.json", tmp_output_dir="temp/tts_temp")
         self.stt_client = STTClient(stt_private_key_path="keys/stt-private-key.json", tmp_output_dir="temp/stt_temp")
-        self.__initialize_assistant()
-        self.__retrieve_pretest(pretest_file_path)
-        self.__retrieve_dialogue(dialogue_file_path)
+        self.video_player = VideoPlayer()
+        self._initialize_assistant()
+        self._retrieve_pretest(pretest_file_path)
+        self._retrieve_dialogue(dialogue_file_path)
+        self._retrieve_videos_path()
 
-    def __initialize_assistant(self):
+    def _initialize_assistant(self):
         # Update instructions, model, and tools assistants can use
+        self.client.beta.assistants.update(assistant_id=self.assistant.id, name="Science Tutor for children")
         instructions = "As a conversational agent designed to help children from 3 to 6 learn science."
         self.client.beta.assistants.update(assistant_id=self.assistant.id, instructions=instructions)
         self.client.beta.assistants.update(assistant_id=self.assistant.id, model="gpt-4o")
@@ -30,16 +35,22 @@ class AdaptiveCA:
                            generate_feedback_function_json, simplify_question_function_json]
         available_tools = [{"type": "function", "function": tool} for tool in available_tools]
         self.client.beta.assistants.update(assistant_id=self.assistant.id, tools=available_tools)
+        self.get_assistant_info()
 
-    def __retrieve_pretest(self, pretest_file_path):
+    def _retrieve_pretest(self, pretest_file_path):
         df = pd.read_excel(pretest_file_path, usecols=["question", "level", "answer"])
         self.pretest = df.to_dict(orient="records")
 
-    def __retrieve_dialogue(self, dialogue_file_path):
+    def _retrieve_dialogue(self, dialogue_file_path):
         df = pd.read_excel(dialogue_file_path, usecols=["text", "question"])
         self.dialogues = df.to_dict(orient="records")
         # For now don't retrieve question without any dialogue (e.g. in town_picnic_base.xlsx)
         self.dialogues = [dialogue for dialogue in self.dialogues if dialogue["text"].strip()]
+
+    def _retrieve_videos_path(self):
+        videos_dir = "videos"     # TODO: ideally this should be in a config and everything is read from config
+        video_names = ["01_episode.mp4", "02_episode.mp4"]  # Should be sorted according to the dialogue order
+        self.video_path_list = [os.path.join(videos_dir, video_name) for video_name in video_names]
 
     def get_assistant_info(self):
         assistant_data = self.client.beta.assistants.retrieve(self.assistant.id).model_dump()
@@ -92,11 +103,12 @@ class AdaptiveCA:
                                        "Your goal is to help the child learn science knowledge from the stories.")))
         learning_history = []
 
-        for dialogue in self.dialogues[:2]:
+        for idx, dialogue in enumerate(self.dialogues[:2]):
             dialogue_text, base_question = dialogue["text"], dialogue["question"]
-            print("Story begins:")
-            print(dialogue_text[:200])     # TODO: Should show video instead of displaying bunch of text.
-            print("----^ video playing")
+            # print("Story begins:")
+            # print(dialogue_text[:200])     # TODO: Should show video instead of displaying bunch of text.
+            print("---- video playing")
+            self.video_player.play_video(self.video_path_list[idx], max_duration=5)
             # Learning history for this part only
             current_learning_history = []
             # Story conversing
@@ -126,7 +138,7 @@ class AdaptiveCA:
                 "answer": child_answer,
                 "accuracy": accuracy
             })
-            print(accuracy)
+            print(f"Answer's accuracy: {accuracy}")
 
             # Trigger simplifying question
             if accuracy <= 0.5:
@@ -164,6 +176,7 @@ class AdaptiveCA:
 
     def run_program(self):
         # Pretest
+        print("=" * 50)
         pre_test_pre_msg = "Let's begin with a pretest!"
         print(pre_test_pre_msg)
         self.tts_client.text_to_speech(pre_test_pre_msg)

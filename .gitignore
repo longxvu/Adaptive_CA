@@ -9,3 +9,5 @@ temp/
 *.wav
 keys/
 *.ipynb
+videos/
+*.mp4
