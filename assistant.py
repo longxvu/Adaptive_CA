@@ -7,34 +7,18 @@ from utils import load_json_response
 class GPTAssistant:
     # Create an OpenAI chat assistant.
     # Normally an assistant can have multiple threads but for our purpose we restrict to 1 thread to preserve context
-    def __init__(self, client: OpenAI, assistant_id: str = None, assistant_name: str = None,
-                 instruction: str = None, model: str = "gpt-3.5-turbo-0125"):
+    # This class is mainly just to wrap around OpenAI's API call to make it easier to use
+    def __init__(self, client: OpenAI, assistant_id: str):
         # TODO: In the API example, they seem to encourage only using 1 assistant for multiple threads, instead of using
         # 1 assistant for only 1 thread. Need to figure out why (?) Maybe one assistant when creating multiple threads
         # are trained on those specific threads? So the later usage of the same assistant will be better?
         self.client = client
-        if not assistant_id:
-            self.assistant = self.client.beta.assistants.create(
-                name=assistant_name,
-                instructions=instruction,
-                model=model
-            )
-        else:
-            self.assistant = self.client.beta.assistants.retrieve(assistant_id)
+        self.assistant = self.client.beta.assistants.retrieve(assistant_id)
+        self.id = assistant_id
 
         # New assistant is basically old assistant but new thread, can rewrite this one maybe
         self.thread = self.client.beta.threads.create()
         self.last_run = None
-        self.function_map = {
-            "display_quiz": {
-                "function": self.display_quiz,
-                "arguments": ["title", "questions"]
-            },
-            "generate_feedback": {
-                "function": self.display_feedback,
-                "arguments": ["evaluation"]
-            }
-        }
 
     def submit_message(self, message):
         self.client.beta.threads.messages.create(
@@ -64,9 +48,10 @@ class GPTAssistant:
         self.wait_on_run()
         message = next(iter(self.client.beta.threads.messages.list(thread_id=self.thread.id)))
         if pretty:
-            return f"{message.role}: {message.content[0].text.value}"     # TODO: Maybe later but why 0?
+            return f"{message.content[0].text.value}"     # TODO: Maybe later but why 0?
         else:
-            return message
+            print(message.content)
+            return f"{message.role}: {message.content[0].text.value}"
 
     def get_all_messages(self):
         self.wait_on_run()
@@ -84,86 +69,55 @@ class GPTAssistant:
     # input from our side, and submit it back to the GPT model
     def resolve_run_required_action(self):
         self.wait_on_run()
-        assert self.run_requires_action()
+        if not self.run_requires_action():
+            return
         all_tool_outputs = []
-        action_items = {}
+        json_responses = []
         for tool_call in self.last_run.required_action.submit_tool_outputs.tool_calls:
             # Different tool requires different tool output maybe
             name = tool_call.function.name
-            required_function = self.function_map[name]["function"]
-            arguments = json.loads(tool_call.function.arguments)
+            # required_function = self.function_map[name]["function"]
+            json_output = json.loads(tool_call.function.arguments)
             print(f"Calling: {name}")
-            # print(arguments)
+            # print(json_output)
             # Extracting required arguments from an arbitrary defined function. Need to define it in self.function_map
-            arguments = [arguments[key] for key in self.function_map[name]["arguments"]]
-            responses = required_function(*arguments)
+            # arguments = [json_output[key] for key in self.function_map[name]["arguments"]]
+            # responses = required_function(*arguments)
+            responses = None
             # print(responses)
             all_tool_outputs.append({
                 "tool_call_id": tool_call.id,
                 "output": json.dumps(responses)
             })
-            action_items[name] = responses  # Return from each function is mapped to the function name
+
+            json_responses.append(json_output)
+
         self.last_run = self.client.beta.threads.runs.submit_tool_outputs(
             thread_id=self.thread.id,
             run_id=self.last_run.id,
             tool_outputs=all_tool_outputs
         )
-        return action_items
+        return json_responses
+
+    # Basically a wrapper for a conversation step. If no tools are specified, it will behave exactly like a chatbot
+    # If tools are specified, the assistant will try to use the tools if context fit.
+    # The reason we will use tools is to have a foolproof json response format.
+    def converse(self, message, tools=None):
+        # Update tools used in this message
+        if tools is None:
+            tools = []
+        api_tools = [{"type": "function", "function": tool} for tool in tools]
+        self.client.beta.assistants.update(assistant_id=self.id, tools=api_tools)
+        self.submit_message(message)
+
+        if not tools:
+            return self.get_last_response()
+
+        json_response = self.resolve_run_required_action()
+        return self.get_last_response(), json_response
 
     def run_not_finished(self):
         return self.last_run.status == "queued" or self.last_run.status == "in_progress"
 
     def run_requires_action(self):
         return self.last_run.status == "requires_action"
-
-    def get_user_input(self):
-        return input("Answer: ")
-
-    def display_quiz(self, title, questions):
-        # print(title, questions)   # this is for debugging arguments passed by OpenAI API
-        print("Quiz:", title)
-        print()
-        num_q_difficulty = [0] * 3
-        diff_map = {"EASY": 0, "MEDIUM": 1, "HARD": 2}      # TODO: hardcoded
-        responses = []
-
-        for q in questions:
-            print(f"Questions: {q['question_text']} ({q['difficulty']} - {q['category']})")
-            num_q_difficulty[diff_map[q["difficulty"]]] += 1
-            response = ""
-
-            # If multiple choice, print options
-            if q["question_type"] == "MULTIPLE_CHOICE":
-                for i, choice in enumerate(q["choices"]):
-                    print(f"{chr(i + ord('a'))}) {choice}")
-                response = self.get_user_input()
-
-            # Otherwise, just get response
-            elif q["question_type"] == "FREE_RESPONSE":
-                response = self.get_user_input()
-
-            responses.append(response)
-            print()
-        print(f"Student responses: {responses}")
-
-        return num_q_difficulty, responses
-
-    def display_feedback(self, evaluation):
-        scores = [list() for _ in range(3)]    # scores for easy, medium, hard
-        diff_map = {"EASY": 0, "MEDIUM": 1, "HARD": 2}
-        concepts = {"mastered": [], "learning": []}
-        for idx, e in enumerate(evaluation):
-            print(f"Question {idx + 1}:")
-            print(f"Student response: {e['student_response']}")
-            print(f"Feedback: {e['feedback']}")
-            print(f"Score: {e['score']}")
-            scores[diff_map[e["difficulty"]]].append(e["score"])
-            if e['score'] <= 4:
-                concepts["learning"].append(e['concept'])
-            else:
-                concepts["mastered"].append(e['concept'])
-            print()
-        # print(f"Quiz score: {sum(scores)}/{len(scores)}")
-        print(f"Mastered concepts: {concepts['mastered']}")
-        print(f"Learning concepts: {concepts['learning']}")
-        return scores, concepts

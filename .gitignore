@@ -4,3 +4,8 @@ testing.ipynb
 .ipynb_checkpoints
 .idea
 __pycache__/
+.DS_Store/
+temp/
+*.wav
+keys/
+*.ipynb

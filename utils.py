@@ -24,11 +24,11 @@ def list_all_assistant(client: OpenAI, concise=True):
         print("=" * 50)
 
 
-def get_api_key():
+def get_api_key(api_key_file="keys/.api_key"):
     try:
         from IPython import get_ipython
         shell = get_ipython().__class__.__module__
-        print(shell)
+        # print(shell)
         if shell == "google.colab._shell":
             from google.colab import userdata
             return userdata.get("OPENAI_API_KEY")
@@ -36,8 +36,9 @@ def get_api_key():
         # Probably standard interpreter
         pass
     # All other cases
-    assert os.path.isfile(".api_key"), "API key file not found."
-    with open(".api_key", "r") as f:
+    assert os.path.isfile(api_key_file), ("API key file not found. "
+                                          "You should save OpenAI's API key in keys/.api_key file.")
+    with open(api_key_file, "r") as f:
         key = f.read().strip()
     return key
 
