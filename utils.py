@@ -32,7 +32,7 @@ def get_api_key(api_key_file="keys/.api_key"):
         if shell == "google.colab._shell":
             from google.colab import userdata
             return userdata.get("OPENAI_API_KEY")
-    except NameError:
+    except (NameError, ModuleNotFoundError):
         # Probably standard interpreter
         pass
     # All other cases

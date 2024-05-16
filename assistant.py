@@ -1,7 +1,6 @@
 from openai import OpenAI
 import json
 import time
-from utils import load_json_response
 
 
 class GPTAssistant:

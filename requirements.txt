@@ -1,0 +1,12 @@
+openai
+pandas
+playsound==1.2.2
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+google-cloud-texttospeech
+google-cloud-speech
+sounddevice
+soundfile
+python-vlc
+openpyxl
