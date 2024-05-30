@@ -41,7 +41,7 @@ generate_question_function_json = {
                    "stories (represented as dialogue between multiple characters). You will be given a base question, "
                    "and the children's learning history. The question generated should be related to the story, with "
                    "the same concept asked in the base question. The difficulty should be adapted based on the "
-                   "children's learning history.",
+                   "children's learning history. The question should focus on a science concept presented in the story.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -54,7 +54,22 @@ generate_question_function_json = {
                 "type": "string",
                 "description": "The difficulty level of the question. If the child demonstrates great understanding "
                                "of the knowledge, a deeper question should be generated. If the child is struggling "
-                               "with answering the question, an easier question should be generated.",
+                               "with answering the question, an easier question should be generated.\n"
+                               "Shallow level questions are straightforward and often require short answers. They can "
+                               "be answered with a simple 'yes' or 'no', offer a choice between two options, "
+                               "require specific factual information, or ask for straightforward examples. These "
+                               "questions are typically fact-based and don't require much interpretation or critical "
+                               "thinking.\n"
+                               "Intermediate level questions delve deeper and require the respondent to provide "
+                               "descriptions, quantities, definitions, or comparisons. They ask about "
+                               "characteristics/features, definitions, numerical information, or require identifying "
+                               "similarities and differences. These questions require a moderate level of thought and "
+                               "understanding of the topic.\n"
+                               "Deep level questions are the most complex and demand higher cognitive skills. They "
+                               "involve interpreting meanings, understanding causes and consequences, exploring goals "
+                               "and motivations, detailing processes, considering enabling factors, analyzing unmet "
+                               "expectations, and eliciting personal judgments or evaluations. These questions "
+                               "encourage critical thinking, explanation, inference, and personal reflection.",
                 "enum": ["SHALLOW", "INTERMEDIATE", "DEEP"]
             },
             "rationale": {
@@ -68,7 +83,8 @@ generate_question_function_json = {
 simplify_question_function_json = {
     "name": "simplify_question",
     "description": "You are given a question, you will rephrase the question such that it is easier for a child to "
-                   "answer. The rephrased question can be answered by a yes/no answer.",
+                   "answer. The rephrased question can be answered by a yes/no answer. The simplified question must "
+                   "be different from the original question.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -82,24 +98,31 @@ simplify_question_function_json = {
 
 generate_feedback_function_json = {
     "name": "generate_feedback",
-    "description": "Generate the feedback for the child's answer. Keep the language used encouraging to the child.",
+    "description": "Generate the feedback for the child's answer. The feedback is meant to be encouraging and as simple"
+                   "as possible to aid the child's in understanding the science concept.",
     "parameters": {
         "type": "object",
         "properties": {
+            # "rephrased_response": {
+            #     "type": "string",
+            #     "description": "The rephrased child's answer. This should be different from the child's original "
+            #                    "answer and should begin with 'Your answer is '.",
+            # },
             "accuracy": {
                 "type": "number",
                 "description": "Give a score from 0 (incorrect) to 1 (correct) based on how well the child answer."
             },
             "evaluation": {
                 "type": "string",
-                "description": "Evaluation of the child's answer, it should be encouraging regardless of the "
-                               "correctness of the child's answer, such as: 'Good job', 'Good thinking', etc. If the "
-                               "child's answer is irrelevant, direct them back."
+                "description": "Evaluation of the correctness of their answers using encouraging tone, such as: "
+                               "'Good job', 'Good thinking', etc. If the child's answer is irrelevant, direct them "
+                               "back."
             },
             "explanation": {
                 "type": "string",
-                "description": "An explanation of the question within 20 words. Make the explanation as simple as "
-                               "possible."
+                "description": "An explanation of the question within 20 words. The explanation should have its "
+                               "language as close as the language used in the story. It should be as simple as possible"
+                               "such that a child from 5 to 8 years old can understand."
             },
             "transition": {
                 "type": "string",
@@ -107,7 +130,7 @@ generate_feedback_function_json = {
                                "reading!', ‘Let’s keep going!’, etc. Keep it under 5 words."
             },
         },
-        "required": ["accuracy", "evaluation", "explanation", "transition"]
+        "required": ["rephrased_response", "accuracy", "evaluation", "explanation", "transition"]
     }
 }
 
