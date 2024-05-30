@@ -20,7 +20,7 @@ class AdaptiveCA:
         self.assistant = GPTAssistant(self.client, assistant_id)
         self.tts_client = TTSClient(tts_private_key_path="keys/tts-private-key.json", tmp_output_dir="temp/tts_temp")
         self.stt_client = STTClient(stt_private_key_path="keys/stt-private-key.json", tmp_output_dir="temp/stt_temp")
-        self.video_player = VideoPlayer()
+        self.video_player = VideoPlayer(full_screen=True)
         self._initialize_assistant()
         self._retrieve_pretest(pretest_file_path)
         self._retrieve_dialogue(dialogue_file_path)
@@ -52,7 +52,12 @@ class AdaptiveCA:
     def _retrieve_videos_path(self):
         videos_dir = "videos"  # TODO: ideally this should be in a config and everything is read from config
         video_names = ["01_episode.mp4", "02_episode.mp4"]  # Should be sorted according to the dialogue order
-        self.video_path_list = [os.path.join(videos_dir, video_name) for video_name in video_names]
+        episode_path_list = [os.path.join(videos_dir, video_name) for video_name in video_names]
+        self.video_path_list = {
+            "episodes": episode_path_list,
+            "idle": os.path.join(videos_dir, "rosita-idle.mp4"),
+            "lip_flap": os.path.join(videos_dir, "rosita-lip-flap.mp4"),
+        }
 
     def get_assistant_info(self):
         assistant_data = self.client.beta.assistants.retrieve(self.assistant.id).model_dump()
@@ -64,12 +69,20 @@ class AdaptiveCA:
         texts = " ".join(texts)
         print(texts)
         if not self.text_IO:
+            # Playing lip flap video while TTS
+            self.video_player.play_video_non_blocking(self.video_path_list["lip_flap"])
             self.tts_client.text_to_speech(texts)
+            self.video_player.stop_video()
 
     def get_response(self):
         if self.text_IO:
             return input("Response: ")
+
+        # Playing idle video while getting response
+        self.video_player.play_video_non_blocking(self.video_path_list["idle"])
         response = self.stt_client.speech_to_text(5)
+        self.video_player.stop_video()
+
         if response:
             response = response[0]
         print(f"Response: {response}")
@@ -146,7 +159,7 @@ class AdaptiveCA:
             if self.text_IO:  # Debugging
                 print(dialogue_text[:200] + "...")
             else:
-                self.video_player.play_video(self.video_path_list[idx], max_duration=5)
+                self.video_player.play_video(self.video_path_list["episodes"][idx], max_duration=5)
             # Learning history for this part only
             current_learning_history = []
 

@@ -1,5 +1,6 @@
 import vlc
 import time
+import threading
 
 
 class VideoPlayer:
@@ -7,7 +8,7 @@ class VideoPlayer:
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
         if full_screen:
-            self.player.toggle_fullscren()
+            self.player.toggle_fullscreen()
 
     def play_video(self, video_path, max_duration=None):
         self.player.set_mrl(video_path)
@@ -26,6 +27,14 @@ class VideoPlayer:
             if state not in playing_states or time.time() - start_time > max_duration:
                 break
 
+        self.stop_video()
+
+    def play_video_non_blocking(self, video_path, max_duration=None):
+        video_player_thread = threading.Thread(target=self.play_video, args=(video_path, max_duration))
+        video_player_thread.start()
+        return video_player_thread
+
+    def stop_video(self):
         self.player.stop()
 
 
