@@ -17,7 +17,7 @@ from .audio_recorder import MicRecorder
 
 class STTClient:
     def __init__(self, stt_private_key_path="../keys/stt-private-key.json", sample_frequency=24000, max_alternatives=3,
-                 tmp_output_dir="../temp/stt_temp"):
+                 output_dir=None, logger=None):
         # STT Client and config
         assert os.path.exists(stt_private_key_path), f"STT private key file at {stt_private_key_path} does not exist."
         credentials = service_account.Credentials.from_service_account_file(stt_private_key_path)
@@ -29,15 +29,7 @@ class STTClient:
             max_alternatives=max_alternatives,
         )
 
-        self.audio_recorder = MicRecorder(sample_rate=sample_frequency, output_dir=tmp_output_dir)
-
-        # Create and cleanup temporary directory output
-        self.tmp_output_dir = tmp_output_dir
-        if os.path.exists(self.tmp_output_dir):
-            shutil.rmtree(self.tmp_output_dir)
-        os.makedirs(self.tmp_output_dir)
-
-        self.tmp_file_idx = 0
+        self.audio_recorder = MicRecorder(sample_frequency, output_dir, logger)
 
     def get_speech_text_from_file(self, file_path) -> list[str]:
         with open(file_path, "rb") as audio_file:
@@ -56,6 +48,6 @@ class STTClient:
 
 
 if __name__ == "__main__":
-    stt_client = STTClient(sample_frequency=16000)
+    stt_client = STTClient(sample_frequency=16000, output_dir=".")
     result = stt_client.speech_to_text(3)
     print(result)

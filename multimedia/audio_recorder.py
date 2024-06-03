@@ -75,16 +75,20 @@ class MicReader:
 
 
 class MicRecorder:
-    def __init__(self, sample_rate, output_dir):
+    def __init__(self, sample_rate, output_dir, logger=None):
         self.sample_rate = sample_rate
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
         self._stop_flag = False
+        self.logger = logger
 
     def record(self, durations: int):
-        print(f"Recording for {durations} seconds....")
         self._stop_flag = False
         rec_path = os.path.join(self.output_dir, f"{datetime.now().strftime('%y-%m-%d_%H-%M-%S')}.wav")
+        if self.logger:
+            self.logger.debug(f"Recording for {durations} seconds to {rec_path}...")
+        else:
+            print(f"Recording for {durations} seconds to {rec_path}...")
 
         with AudioWriter(rec_path, sample_rate=self.sample_rate) as audio_writer:
             mic_reader = MicReader(self.sample_rate, durations, mic_rec_callback=audio_writer.write)

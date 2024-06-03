@@ -7,16 +7,16 @@ class GPTAssistant:
     # Create an OpenAI chat assistant.
     # Normally an assistant can have multiple threads but for our purpose we restrict to 1 thread to preserve context
     # This class is mainly just to wrap around OpenAI's API call to make it easier to use
-    def __init__(self, client: OpenAI, assistant_id: str):
-        # TODO: In the API example, they seem to encourage only using 1 assistant for multiple threads, instead of using
-        # 1 assistant for only 1 thread. Need to figure out why (?) Maybe one assistant when creating multiple threads
-        # are trained on those specific threads? So the later usage of the same assistant will be better?
+    def __init__(self, client: OpenAI, assistant_id: str, logger=None):
         self.client = client
         self.assistant = self.client.beta.assistants.retrieve(assistant_id)
         self.id = assistant_id
+        self.logger = logger
 
         # New assistant is basically old assistant but new thread, can rewrite this one maybe
         self.thread = self.client.beta.threads.create()
+        if self.logger:
+            self.logger.debug(f"Current thread's ID: {self.thread.id}")
         self.last_run = None
 
     def submit_message(self, message):
@@ -77,8 +77,9 @@ class GPTAssistant:
             name = tool_call.function.name
             # required_function = self.function_map[name]["function"]
             json_output = json.loads(tool_call.function.arguments)
-            print(f"Calling: {name}")
-            # print(json_output)
+            if self.logger:
+                self.logger.debug(f"Calling: {name}")
+                self.logger.debug(json_output)
             # Extracting required arguments from an arbitrary defined function. Need to define it in self.function_map
             # arguments = [json_output[key] for key in self.function_map[name]["arguments"]]
             # responses = required_function(*arguments)

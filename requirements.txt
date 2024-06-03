@@ -10,3 +10,4 @@ sounddevice
 soundfile
 python-vlc
 openpyxl
+PyYAML

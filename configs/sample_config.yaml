@@ -1,0 +1,25 @@
+private_key_path:
+  OpenAI: keys/.api_key
+  GoogleSTT: keys/stt-private-key.json
+  GoogleTTS: keys/tts-private-key.json
+
+OpenAI_assistant:
+  id: asst_ZNz4lbi6z8bpKkE6APKdrpQ8
+
+logging:
+  logging_dir: running_logs/
+  stt_log_dir: child_stt/
+  tts_log_dir: assistant_tts/
+  assistant_log_file: assistant_info.log
+  debug_log_file: program_info.log
+
+episode:
+  pretest_file: transcripts/lucky_shirt_pre_test.xlsx
+  transcript_file: transcripts/lucky_shirt_base.xlsx
+  idle_video_file: videos/rosita-idle.mp4
+  lip_lap_video_file: videos/rosita-lip-flap.mp4
+  # video_directory should contains 01_episode.mp4, 02_episode.mp4, etc.
+  video_directory: videos/lucky_shirt/
+
+childID: 0001
+max_testing_videos: 2

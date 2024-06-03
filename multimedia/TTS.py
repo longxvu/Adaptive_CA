@@ -15,7 +15,7 @@ from google.oauth2 import service_account
 
 
 class TTSClient:
-    def __init__(self, tts_private_key_path="../keys/tts-private-key.json", tmp_output_dir="../temp/tts_temp"):
+    def __init__(self, tts_private_key_path="../keys/tts-private-key.json", output_dir=None, logger=None):
         # Google Cloud client API
         assert os.path.exists(tts_private_key_path), f"TTS private key file at {tts_private_key_path} does not exist."
         credentials = service_account.Credentials.from_service_account_file(tts_private_key_path)
@@ -29,11 +29,8 @@ class TTSClient:
             audio_encoding=texttospeech.AudioEncoding.LINEAR16
         )
 
-        # Cleanup and create temporary output directory
-        self.tmp_output_dir = tmp_output_dir
-        if os.path.exists(self.tmp_output_dir):
-            shutil.rmtree(tmp_output_dir)
-        os.makedirs(self.tmp_output_dir)
+        self.logger = logger
+        self.output_dir = output_dir
         self.file_idx = 0
 
     def text_to_speech(self, text):
@@ -42,14 +39,18 @@ class TTSClient:
             response = self.client.synthesize_speech(
                 input=synthesis_input, voice=self.voice, audio_config=self.audio_config
             )
-            file_path = os.path.join(self.tmp_output_dir, f"{self.file_idx:03}.wav")
+            file_path = os.path.join(self.output_dir, f"{self.file_idx:03}.wav")
             with open(file_path, "wb") as out:
                 out.write(response.audio_content)
-                # print(f'Audio content written to file "{file_path}"')
+                if self.logger:
+                    self.logger.debug(f'Audio content written to file "{file_path}"')
             self.file_idx += 1
             playsound.playsound(file_path)
         except Exception as e:
-            print(e)
+            if self.logger:
+                self.logger.error(e)
+            else:
+                print(e)
 
 
 if __name__ == "__main__":

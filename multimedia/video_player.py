@@ -4,11 +4,12 @@ import threading
 
 
 class VideoPlayer:
-    def __init__(self, full_screen=False):
+    def __init__(self, full_screen=False, logger=None):
         self.instance = vlc.Instance()
         self.player = self.instance.media_player_new()
         if full_screen:
             self.player.toggle_fullscreen()
+        self.logger = logger
 
     def play_video(self, video_path, max_duration=None):
         self.player.set_mrl(video_path)
@@ -18,7 +19,11 @@ class VideoPlayer:
         playing_states = {1, 2, 3, 4}
         duration = self.player.get_length() / 1000
 
-        print(f"Playing {video_path} for {int(duration // 60)}m{int(duration % 60)}s")
+        logging_message = f"Playing {video_path} for {int(duration // 60)}m{int(duration % 60)}s"
+        if self.logger:
+            self.logger.debug(logging_message)
+        else:
+            print(logging_message)
         max_duration = max_duration if max_duration is not None else float("inf")
         start_time = time.time()
         while True:
