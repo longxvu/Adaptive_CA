@@ -10,6 +10,7 @@ class VideoPlayer:
         if full_screen:
             self.player.toggle_fullscreen()
         self.logger = logger
+        self.instance.log_unset()
 
     def play_video(self, video_path, max_duration=None):
         self.player.set_mrl(video_path)

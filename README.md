@@ -16,9 +16,10 @@ Adaptive_CA
 │   │   lucky_shirt_base.xlsx
 │   │   ...
 └─── videos
-│   │   01_episode.mp4
-│   │   02_episode.mp4
-│   │   ...
+└───└───lucky_shirt
+│   │   └─── 01_episode.mp4
+│   │   │    02_episode.mp4
+│   │   rosita-idle.mp4
 │   adaptive_ca.py
 │   ...
 ```
@@ -31,7 +32,12 @@ vlc-cache-gen plugins/
 Depends on where you installed VLC, you might need root access to run the command above
 
 ## Demo
-Everything should work with the default arguments if you followed the directory structure above. Run:
+Everything should work with the default arguments if you followed the directory structure above. Run
+(main adaptive learning loop only):
 ```
 python adaptive_ca.py
+```
+For pretest only, run:
+```
+python adaptive_ca.py --pretest
 ```
