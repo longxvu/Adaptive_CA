@@ -12,6 +12,9 @@ logging:
   tts_log_dir: assistant_tts/
   assistant_log_file: assistant_info.log
   debug_log_file: program_info.log
+  pretest_result: pretest_result.txt
+  learning_result: learning_result.txt
+  raw_assistant_conversation: raw_conversation.txt
 
 episode:
   pretest_file: transcripts/lucky_shirt_pre_test.xlsx

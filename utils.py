@@ -43,6 +43,18 @@ def get_api_key(api_key_file="keys/.api_key"):
     return key
 
 
+def exception_logger(func):
+    # Mainly used for logging error
+    def inner(*args, **kwargs):
+        try:
+            func(*args, **kwargs)
+        except Exception as e:
+            self = args[0]
+            print(e)
+            self.logger.error(repr(e))
+    return inner
+
+
 def generate_question_configuration(num_questions, difficulty_weights=None, max_score_answer=10):
     question_configuration = []
     if difficulty_weights is None:

@@ -76,7 +76,8 @@ generate_question_function_json = {
                 "type": "string",
                 "description": "The rationale for generating the question based on learning history and the story."
             }
-        }
+        },
+        "required": ["question", "level", "rationale"]
     }
 }
 
@@ -103,11 +104,6 @@ generate_feedback_function_json = {
     "parameters": {
         "type": "object",
         "properties": {
-            # "rephrased_response": {
-            #     "type": "string",
-            #     "description": "The rephrased child's answer. This should be different from the child's original "
-            #                    "answer and should begin with 'Your answer is '.",
-            # },
             "accuracy": {
                 "type": "number",
                 "description": "Give a score from 0 (incorrect) to 1 (correct) based on how well the child answer."
@@ -130,7 +126,7 @@ generate_feedback_function_json = {
                                "reading!', ‘Let’s keep going!’, etc. Keep it under 5 words."
             },
         },
-        "required": ["rephrased_response", "accuracy", "evaluation", "explanation", "transition"]
+        "required": ["accuracy", "evaluation", "explanation", "transition"]
     }
 }
 

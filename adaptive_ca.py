@@ -12,6 +12,7 @@ from multimedia.video_player import VideoPlayer
 import yaml
 import time
 import logging
+import argparse
 
 
 class AdaptiveCA:
@@ -152,7 +153,7 @@ class AdaptiveCA:
     def get_response(self):
         if self.text_IO:
             response = input("Response: ")
-            self.logger.info(f"Response: {response}")
+            self.logger.info(f"Response: {response}")       # TODO: input and logger slows down?
             return response
 
         # Playing idle video while getting response
@@ -171,10 +172,8 @@ class AdaptiveCA:
         return answer
 
     def run_pre_test(self):
-        print("Pretest phase")
-        print("=" * 50)
-        print(self.assistant.converse("Now I will begin asking the child a few pretest questions, then you will give me"
-                                      "feedbacks based on the child's answer"))
+        self.assistant.converse("Now I will begin asking the child a few pretest questions, then you will give me"
+                                "feedbacks based on the child's answer")
         for pretest_eval in self.pretest:
             pretest_question, pretest_answer = pretest_eval["question"], pretest_eval["answer"]
             question_level = pretest_eval["level"]
@@ -188,10 +187,10 @@ class AdaptiveCA:
                            "child a feedback based on their answer.")
             responses, json_response = self.assistant.converse(pretest_msg,
                                                                tools=[generate_feedback_pretest_function_json])
-            # print(responses, json_response)
 
             feedback, accuracy = json_response[0]["feedback"], json_response[0]["accuracy"]
             pretest_eval["accuracy"] = accuracy
+            pretest_eval["feedback"] = feedback
 
             self.speak(feedback)
 
@@ -232,7 +231,8 @@ class AdaptiveCA:
             else:
                 self.video_player.play_video(self.video_path_list["episodes"][idx], max_duration=5)
             # Learning history for this part only
-            current_learning_history = []
+            current_learning_history = []   # learning history sent to OpenAI
+            learning_history_log = []       # logging for everything
 
             # Story conversing + generating base question
             question_generation_msg = (f"Here's the story: {dialogue_text}. | \n"
@@ -248,18 +248,27 @@ class AdaptiveCA:
             for q_id in range(max_questions):  # Question levels
                 # Ask question, get child's answer, and generate feedback based on that answer
                 generated_question = json_responses[0]["question"]
+                # level and rationale only exists if generate question is called, not simplified
+                # So if level and rationale doesn't exist in the json_reponses, then reuse the old one
+                level = json_responses[0]["level"] if "level" in json_responses[0] else "SIMPLIFIED"
+                rationale = json_responses[0]["rationale"] if "rationale" in json_responses[0] else "Simplifying previous question"
                 child_answer = self.ask_question(generated_question)
                 feedback, json_responses = generate_feedback(child_answer)
                 accuracy, evaluation, explanation, transition = [json_responses[0][obj] for obj in [
                     "accuracy", "evaluation", "explanation", "transition"]]
                 self.logger.debug(f"Answer's accuracy: {accuracy}")
 
-                # Append it to the learning history
-                current_learning_history.append({
+                learning_history_dict = {
                     "question": generated_question,
+                    "level": level,
+                    "rationale": rationale,
                     "answer": child_answer,
                     "accuracy": accuracy
-                })
+                }
+                # Append it to the learning history
+                current_learning_history.append({k: v for k, v in learning_history_dict.items() if k in
+                                                 ["question", "answer", "accuracy"]})
+                learning_history_log.append(learning_history_dict)
 
                 # Modify the difficulty for the next question
                 last_q_level = next_q_level
@@ -281,35 +290,74 @@ class AdaptiveCA:
                 else:  # Harder question only rely on learning history
                     self.speak(evaluation, explanation, transition)
                     feedback, json_responses = generate_question(current_learning_history)
+            # Add question answer log
+            episode_learning_history.append(learning_history_log)
+        return episode_learning_history
 
-    def run_program(self):
-        # Pretest
-        # print("=" * 50)
-        # pre_test_pre_msg = "Let's begin with a pretest!"
-        # print(pre_test_pre_msg)
-        # self.tts_client.text_to_speech(pre_test_pre_msg)
-        # self.run_pre_test()
-        # print("=" * 50)
+    @utils.exception_logger
+    def run_pretest_program(self):
+        self.logger.info("Begin pretest")
+        self.logger.info("=" * 50)
+        self.speak("Let's begin with a pretest!")
+        self.run_pre_test()
+        self.speak("You're now done with the pretest!")
+        # Now save the pretest learning results
+        pretest_result_file = os.path.join(self.logging_root_dir, self.config["logging"]["pretest_result"])
+        saving_fields = ["child_answer", "accuracy", "feedback"]
+        learning_history = []
+        for pretest_item in self.pretest:
+            learning_history.append("\n".join([str(pretest_item[field]) for field in saving_fields]))
+        # Learning result logging
+        with open(pretest_result_file, "w") as f:
+            f.write("\n\n".join(learning_history))
+        self.logger.info(f"Pretest response is saved to {pretest_result_file}.")
+        # Saving raw convo file
+        assistant_convo_file = os.path.join(self.logging_root_dir, self.config["logging"]["raw_assistant_conversation"])
+        with open(assistant_convo_file, "w") as f:
+            f.write("\n".join(self.assistant.get_all_messages()))
+        self.logger.info(f"Raw assistant conversation saved to {assistant_convo_file}.")
 
+    @utils.exception_logger
+    def run_adaptive_learning_program(self):
         # Adaptive learning loop
-        pre_adaptive_loop_msg = "Let's begin learning some science concepts presented in the story!"
-        self.speak(pre_adaptive_loop_msg)
         self.logger.info("Begin adaptive learning loop")
         self.logger.info("=" * 50)
+        pre_adaptive_loop_msg = "Let's begin learning some science concepts presented in the story!"
+        self.speak(pre_adaptive_loop_msg)
         self.assistant.converse(("Now you will be presented with a transcript from an "
                                  "animation made to help children learn science concepts. The dialogue will be "
                                  "divided into multiple parts, with each part focusing on a science concept. "
                                  "Your goal is to help the child learn science knowledge from the stories."))
-        self.adaptive_learning_loop()
+        learning_history_log = self.adaptive_learning_loop()
 
-        # Done. Clean up the temporary created audio files
+        # Post adaptive loop message
         post_adaptive_loop_msg = "Congratulations! Hope you have fun learning something new today!"
         self.speak(post_adaptive_loop_msg)
-
-        # shutil.rmtree(self.tts_client.tmp_output_dir)
-        # shutil.rmtree(self.stt_client.tmp_output_dir)
+        # Writing to a log file
+        saving_fields = ["question", "level", "rationale", "answer", "accuracy"]
+        learning_log_file = os.path.join(self.logging_root_dir, self.config["logging"]["learning_result"])
+        with open(learning_log_file, "w") as f:
+            for learning_part in learning_history_log:
+                for learning_question in learning_part:
+                    f.write("\n".join([str(learning_question[field]) for field in saving_fields]))
+                    f.write("\n-\n")
+                f.write("=\n")
+        self.logger.info(f"Learning history saved to {learning_log_file}.")
+        # Writing raw OpenAI's conversation
+        assistant_conversation_file = os.path.join(self.logging_root_dir, self.config["logging"]["raw_assistant_conversation"])
+        with open(assistant_conversation_file, "w") as f:
+            f.write("\n".join(self.assistant.get_all_messages()))
+        self.logger.info(f"Raw assistant conversation saved to {assistant_conversation_file}.")
 
 
 if __name__ == "__main__":
+    # Pretest flag
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--pretest", action="store_true", help="Running pretest program")
+    arguments = argparser.parse_args()
+    # Main program loop
     adaptive_conversational_agent = AdaptiveCA(text_only=False)
-    adaptive_conversational_agent.run_program()
+    if arguments.pretest:
+        adaptive_conversational_agent.run_pretest_program()
+    else:
+        adaptive_conversational_agent.run_adaptive_learning_program()
