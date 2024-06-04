@@ -65,7 +65,7 @@ class AdaptiveCA:
         # Private keys + all episode pretest + transcript
         targets = list(self.config["private_key_path"].values()) + list(self.config["episode"].values())
         # Videos check
-        for video_idx in range(1, self.config["max_testing_videos"] + 1):
+        for video_idx in range(1, self.config["video_settings"]["max_videos"] + 1):
             targets.append(os.path.join(self.config["episode"]["video_directory"], f"{video_idx:02}_episode.mp4"))
 
         num_missing = 0
@@ -126,7 +126,7 @@ class AdaptiveCA:
 
         # Retrieving videos file
         episode_path_list = [os.path.join(self.config["episode"]["video_directory"], f"{video_idx:02}_episode.mp4")
-                             for video_idx in range(1, self.config["max_testing_videos"] + 1)]
+                             for video_idx in range(1, self.config["video_settings"]["max_videos"] + 1)]
         self.video_path_list = {
             "episodes": episode_path_list,
             "idle": self.config["episode"]["idle_video_file"],
@@ -158,7 +158,7 @@ class AdaptiveCA:
 
         # Playing idle video while getting response
         self.video_player.play_video_non_blocking(self.video_path_list["idle"])
-        response = self.stt_client.speech_to_text(5)
+        response = self.stt_client.speech_to_text(self.config["stt_settings"]["max_recording_duration"])
         self.video_player.stop_video()
 
         if response:
@@ -223,13 +223,14 @@ class AdaptiveCA:
         question_levels = ["shallow", "intermediate", "deep"]
         episode_learning_history = []
 
-        for idx, dialogue in enumerate(self.dialogues[:2]):  # Episode levels
+        for idx, dialogue in enumerate(self.dialogues[:self.config["video_settings"]["max_videos"]]):  # Episode levels
             dialogue_text, base_question = dialogue["text"], dialogue["question"]
             self.logger.info("Video playing...")
             if self.text_IO:  # Debugging
                 self.logger.info(dialogue_text[:200] + "...")
             else:
-                self.video_player.play_video(self.video_path_list["episodes"][idx], max_duration=5)
+                self.video_player.play_video(self.video_path_list["episodes"][idx],
+                                             max_duration=self.config["video_settings"]["max_playing_duration"])
             # Learning history for this part only
             current_learning_history = []   # learning history sent to OpenAI
             learning_history_log = []       # logging for everything

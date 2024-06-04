@@ -1,3 +1,5 @@
+childID: 0001
+
 private_key_path:
   OpenAI: keys/.api_key
   GoogleSTT: keys/stt-private-key.json
@@ -24,5 +26,12 @@ episode:
   # video_directory should contains 01_episode.mp4, 02_episode.mp4, etc.
   video_directory: videos/lucky_shirt/
 
-childID: 0001
-max_testing_videos: 2
+video_settings:
+  # Maximum number of videos to test, setting this to number of videos available or large number (99) to test all videos
+  max_videos: 2
+  # Maximum duration to play in a videos, setting this to a large number (9999) to play full videos
+  max_playing_duration: 7
+
+stt_settings:
+  # Maximum time to record child's response, currently at 5 second only
+  max_recording_duration: 5
