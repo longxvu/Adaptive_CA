@@ -81,19 +81,47 @@ generate_question_function_json = {
     }
 }
 
-simplify_question_function_json = {
-    "name": "simplify_question",
-    "description": "You are given a question, you will rephrase the question such that it is easier for a child to "
-                   "answer. The rephrased question can be answered by a yes/no answer. The simplified question must "
-                   "be different from the original question.",
+select_question_function_json = {
+    "name": "select_question",
+    "description": "Your goal is to help the child learn science knowledge from the given story dialogues by "
+                   "selecting an appropriate question from the question bank. You will be given a question bank, the "
+                   "targeted question level, and the child's learning history. Based on these information, the question"
+                   "selected should aid the child in learning more about the science concepts.",
     "parameters": {
         "type": "object",
         "properties": {
             "question": {
                 "type": "string",
-                "description": "The rephrased and simplified question."
+                "description": "The selected question from the question bank."
+            },
+            "level": {
+                "type": "string",
+                "description": "The level of the selected question.",
+                "enum": ["SHALLOW", "INTERMEDIATE", "DEEP"]
+            },
+            "rationale": {
+                "type": "string",
+                "description": "The rationale for selecting the question based on learning history and the story."
             }
-        }
+        },
+        "required": ["question", "level", "rationale"]
+    }
+}
+
+simplify_question_function_json = {
+    "name": "simplify_question",
+    "description": "You are given a question, you will simplify the question so that it's easier for the child to "
+                   "understand the question. The simplified question must be either yes/no question or a multiple "
+                   "choice question.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The simplified question that is a yes/no or a multiple choice question."
+            }
+        },
+        "required": ["question"]
     }
 }
 

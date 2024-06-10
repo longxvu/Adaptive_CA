@@ -12,7 +12,7 @@ class VideoPlayer:
         self.logger = logger
         self.instance.log_unset()
 
-    def play_video(self, video_path, max_duration=None):
+    def play_video(self, video_path, max_duration=None, stop_when_finished=True):
         self.player.set_mrl(video_path)
         self.player.play()
 
@@ -32,18 +32,25 @@ class VideoPlayer:
             state = self.player.get_state()
             if state not in playing_states or time.time() - start_time > max_duration:
                 break
+        if stop_when_finished:
+            self.player.stop()
+        else:
+            self.player.pause()
 
-        self.stop_video()
-
-    def play_video_non_blocking(self, video_path, max_duration=None):
-        video_player_thread = threading.Thread(target=self.play_video, args=(video_path, max_duration))
+    def play_video_non_blocking(self, video_path, max_duration=None, stop_when_finished=True):
+        video_player_thread = threading.Thread(target=self.play_video, args=(video_path, max_duration,
+                                                                             stop_when_finished))
         video_player_thread.start()
         return video_player_thread
 
     def stop_video(self):
         self.player.stop()
 
+    def pause_video(self):
+        self.player.pause()
+
 
 if __name__ == "__main__":
     video_player = VideoPlayer()
-    video_player.play_video("../videos/02_episode.mp4", 5)
+    video_player.play_video("../videos/rosita-lip-flap.mp4", max_duration=3, stop_when_finished=False)
+    time.sleep(1)

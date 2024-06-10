@@ -3,7 +3,7 @@ from openai import OpenAI
 from assistant import GPTAssistant
 import pandas as pd
 import utils
-from tool_functions import (generate_feedback_pretest_function_json, generate_question_function_json,
+from tool_functions import (generate_feedback_pretest_function_json, select_question_function_json,
                             generate_feedback_function_json, simplify_question_function_json)
 
 from multimedia.TTS import TTSClient
@@ -19,15 +19,14 @@ class AdaptiveCA:
     def __init__(self, config_file="configs/sample_config.yaml", text_only=False):
         with open(config_file) as f:
             self.config = yaml.safe_load(f)
+        # Mainly for testing. I/O will be through console
+        self.text_IO = text_only
 
         self._init_logging()
         self._sanity_check()
+        self._retrieve_episode_content()
         self._initialize_assistant()
         self._init_multimedia_module()
-        self._retrieve_episode_content()
-
-        # Mainly for testing. I/O will be through console
-        self.text_IO = text_only
 
     def _init_logging(self):
         # Initialize all kind of logger
@@ -48,7 +47,10 @@ class AdaptiveCA:
         # Init console logger
         console_formatter = logging.Formatter('%(message)s')
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        if self.text_IO:  # Debug mode on console use
+            console_handler.setLevel(logging.DEBUG)
+        else:
+            console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
         # Init info file logger (Basically all console output + timestamps)
@@ -65,7 +67,10 @@ class AdaptiveCA:
         # Private keys + all episode pretest + transcript
         targets = list(self.config["private_key_path"].values()) + list(self.config["episode"].values())
         # Videos check
-        for video_idx in range(1, self.config["video_settings"]["max_videos"] + 1):
+        # Keeping video_idx at 1
+        self.start_video_idx = self.config["video_settings"]["start_episode"]
+        self.end_video_idx = self.start_video_idx + self.config["video_settings"]["max_videos"]
+        for video_idx in range(self.start_video_idx, self.end_video_idx):
             targets.append(os.path.join(self.config["episode"]["video_directory"], f"{video_idx:02}_episode.mp4"))
 
         num_missing = 0
@@ -88,7 +93,8 @@ class AdaptiveCA:
         instructions = "As a conversational agent designed to help children from 3 to 6 learn science."
         self.client.beta.assistants.update(assistant_id=self.assistant.id, instructions=instructions)
         self.client.beta.assistants.update(assistant_id=self.assistant.id, model="gpt-4o")
-        available_tools = [generate_feedback_pretest_function_json, generate_question_function_json,
+        # These will verify the tool has correct format, even though we are not using it right now
+        available_tools = [generate_feedback_pretest_function_json, select_question_function_json,
                            generate_feedback_function_json, simplify_question_function_json]
         available_tools = [{"type": "function", "function": tool} for tool in available_tools]
         self.client.beta.assistants.update(assistant_id=self.assistant.id, tools=available_tools)
@@ -124,9 +130,20 @@ class AdaptiveCA:
         self.logger.info(f"Retrieved {len(self.dialogues)} parts of episode with base questions from"
                          f" {self.config['episode']['transcript_file']}")
 
+        # Retrieving question banks
+        df = pd.read_excel(self.config["episode"]["question_bank"])
+        df = df.sort_values(by=["id_text", "level"], ascending=[True, False])  # Some hacks here: shallow -> int -> deep
+        self.question_banks = []
+        for dict_item in df.groupby("id_text").agg(list).to_dict(orient="records"):
+            current_questions = []
+            for question, level in zip(dict_item["question"], dict_item["level"]):
+                current_questions.append({"question": question, "level": level.upper()})
+            self.question_banks.append(current_questions)
+        self.logger.info(f"Retrieved {len(df)} questions from {self.config['episode']['question_bank']}")
+
         # Retrieving videos file
         episode_path_list = [os.path.join(self.config["episode"]["video_directory"], f"{video_idx:02}_episode.mp4")
-                             for video_idx in range(1, self.config["video_settings"]["max_videos"] + 1)]
+                             for video_idx in range(self.start_video_idx, self.end_video_idx)]
         self.video_path_list = {
             "episodes": episode_path_list,
             "idle": self.config["episode"]["idle_video_file"],
@@ -146,20 +163,20 @@ class AdaptiveCA:
         self.logger.info(texts)
         if not self.text_IO:
             # Playing lip flap video while TTS
-            self.video_player.play_video_non_blocking(self.video_path_list["lip_flap"])
+            self.video_player.play_video_non_blocking(self.video_path_list["lip_flap"], stop_when_finished=False)
             self.tts_client.text_to_speech(texts)
-            self.video_player.stop_video()
+            self.video_player.pause_video()
 
     def get_response(self):
         if self.text_IO:
             response = input("Response: ")
-            self.logger.info(f"Response: {response}")       # TODO: input and logger slows down?
+            self.logger.info(f"Response: {response}")  # TODO: input and logger slows down?
             return response
 
         # Playing idle video while getting response
-        self.video_player.play_video_non_blocking(self.video_path_list["idle"])
+        self.video_player.play_video_non_blocking(self.video_path_list["idle"], stop_when_finished=False)
         response = self.stt_client.speech_to_text(self.config["stt_settings"]["max_recording_duration"])
-        self.video_player.stop_video()
+        self.video_player.pause_video()
 
         if response:
             response = response[0]
@@ -203,10 +220,10 @@ class AdaptiveCA:
                                                                         tools=[generate_question_function_json])
             return feedback_msg, json_tool_responses
 
-        def generate_feedback(answer):
+        def generate_feedback(question, answer):
             # Template function to generate feedback from child's answer
-            feedback_generation_msg = (f"Here's the child's answer: {answer}. Generate feedback based on this "
-                                       f"answer.")
+            feedback_generation_msg = (f"The question is: '{question}'. Here's the child's answer: '{answer}'. "
+                                       f"Generate feedback based on this answer.")
             feedback_msg, json_tool_responses = self.assistant.converse(feedback_generation_msg,
                                                                         tools=[generate_feedback_function_json])
             return feedback_msg, json_tool_responses
@@ -214,34 +231,49 @@ class AdaptiveCA:
         def simplify_question(question):
             # Template to simplify question
             simplified_generation_msg = (f"The child couldn't answer the previous question, please give me a "
-                                         f"simplified version of {question}")
+                                         f"simplified version of '{question}'")
             feedback_msg, json_tool_responses = self.assistant.converse(simplified_generation_msg,
                                                                         tools=[simplify_question_function_json])
+            return feedback_msg, json_tool_responses
+
+        def select_question(question_banks, q_level, learning_history):
+            question_selection_msg = (f"Here's the child's learning history: {learning_history}. Select a {q_level} "
+                                      f"question from the list of questions: {question_banks}.")
+            feedback_msg, json_tool_responses = self.assistant.converse(question_selection_msg,
+                                                                        tools=[select_question_function_json])
             return feedback_msg, json_tool_responses
 
         # Question level ranges: [0,2] inclusive
         question_levels = ["shallow", "intermediate", "deep"]
         episode_learning_history = []
 
-        for idx, dialogue in enumerate(self.dialogues[:self.config["video_settings"]["max_videos"]]):  # Episode levels
+        for idx, dialogue in enumerate(self.dialogues[self.start_video_idx - 1:self.end_video_idx - 1],
+                                       start=self.start_video_idx - 1):  # 0-index
             dialogue_text, base_question = dialogue["text"], dialogue["question"]
+            current_question_bank = self.question_banks[idx]
             self.logger.info("Video playing...")
             if self.text_IO:  # Debugging
                 self.logger.info(dialogue_text[:200] + "...")
             else:
                 self.video_player.play_video(self.video_path_list["episodes"][idx],
-                                             max_duration=self.config["video_settings"]["max_playing_duration"])
+                                             max_duration=self.config["video_settings"]["max_playing_duration"],
+                                             stop_when_finished=False)
             # Learning history for this part only
-            current_learning_history = []   # learning history sent to OpenAI
-            learning_history_log = []       # logging for everything
+            current_learning_history = []  # learning history sent to OpenAI
+            learning_history_log = []  # logging for everything
 
-            # Story conversing + generating base question
-            question_generation_msg = (f"Here's the story: {dialogue_text}. | \n"
-                                       f"Base question for the given story: {base_question}. | \n "
-                                       f"Generate an intermediate question based on the given story and the base "
-                                       f"question.")
-            feedback, json_responses = self.assistant.converse(question_generation_msg,
-                                                               tools=[generate_question_function_json])
+            # Story conversing
+            question_generation_msg = (f"Here's the current story: {dialogue_text}. | \n"
+                                       f"Through this story, we will assist the child in learning some new science "
+                                       f"concepts.")
+            self.assistant.converse(question_generation_msg)
+            # Keeping the old framework, now we need a mock json_response object to represent the base question
+            # (not generated but fixed)
+            json_responses = [{
+                "question": base_question,
+                "level": "BASE",
+                "rationale": "Base question to start out"
+            }]
 
             # Ask maximum 3 questions
             max_questions = 3
@@ -250,11 +282,12 @@ class AdaptiveCA:
                 # Ask question, get child's answer, and generate feedback based on that answer
                 generated_question = json_responses[0]["question"]
                 # level and rationale only exists if generate question is called, not simplified
-                # So if level and rationale doesn't exist in the json_reponses, then reuse the old one
+                # So if level and rationale doesn't exist in the json_responses, then reuse the old one
                 level = json_responses[0]["level"] if "level" in json_responses[0] else "SIMPLIFIED"
-                rationale = json_responses[0]["rationale"] if "rationale" in json_responses[0] else "Simplifying previous question"
+                rationale = json_responses[0]["rationale"] if "rationale" in json_responses[
+                    0] else "Simplifying previous question"
                 child_answer = self.ask_question(generated_question)
-                feedback, json_responses = generate_feedback(child_answer)
+                feedback, json_responses = generate_feedback(generated_question, child_answer)
                 accuracy, evaluation, explanation, transition = [json_responses[0][obj] for obj in [
                     "accuracy", "evaluation", "explanation", "transition"]]
                 self.logger.debug(f"Answer's accuracy: {accuracy}")
@@ -285,12 +318,14 @@ class AdaptiveCA:
                     self.speak(evaluation, explanation)
                     break
                 # Simplifying previous asked question
-                if next_q_level == 0:  # TODO: currently deep -> intermediate doesn't simplify
+                if next_q_level < last_q_level:     # wrong answer -> simplify
                     self.speak(evaluation, transition)
                     feedback, json_responses = simplify_question(generated_question)
                 else:  # Harder question only rely on learning history
                     self.speak(evaluation, explanation, transition)
-                    feedback, json_responses = generate_question(current_learning_history)
+                    # feedback, json_responses = generate_question(current_learning_history)
+                    feedback, json_responses = select_question(current_question_bank, question_levels[next_q_level],
+                                                               current_learning_history)
             # Add question answer log
             episode_learning_history.append(learning_history_log)
         return episode_learning_history
@@ -309,14 +344,15 @@ class AdaptiveCA:
         for pretest_item in self.pretest:
             learning_history.append("\n".join([str(pretest_item[field]) for field in saving_fields]))
         # Learning result logging
-        with open(pretest_result_file, "w") as f:
+        with open(pretest_result_file, "w", encoding="utf-8") as f:
             f.write("\n\n".join(learning_history))
         self.logger.info(f"Pretest response is saved to {pretest_result_file}.")
         # Saving raw convo file
         assistant_convo_file = os.path.join(self.logging_root_dir, self.config["logging"]["raw_assistant_conversation"])
-        with open(assistant_convo_file, "w") as f:
+        with open(assistant_convo_file, "w", encoding="utf-8") as f:
             f.write("\n".join(self.assistant.get_all_messages()))
         self.logger.info(f"Raw assistant conversation saved to {assistant_convo_file}.")
+        self.video_player.stop_video()
 
     @utils.exception_logger
     def run_adaptive_learning_program(self):
@@ -337,7 +373,7 @@ class AdaptiveCA:
         # Writing to a log file
         saving_fields = ["question", "level", "rationale", "answer", "accuracy"]
         learning_log_file = os.path.join(self.logging_root_dir, self.config["logging"]["learning_result"])
-        with open(learning_log_file, "w") as f:
+        with open(learning_log_file, "w", encoding="utf-8") as f:
             for learning_part in learning_history_log:
                 for learning_question in learning_part:
                     f.write("\n".join([str(learning_question[field]) for field in saving_fields]))
@@ -345,19 +381,22 @@ class AdaptiveCA:
                 f.write("=\n")
         self.logger.info(f"Learning history saved to {learning_log_file}.")
         # Writing raw OpenAI's conversation
-        assistant_conversation_file = os.path.join(self.logging_root_dir, self.config["logging"]["raw_assistant_conversation"])
-        with open(assistant_conversation_file, "w") as f:
+        assistant_conversation_file = os.path.join(self.logging_root_dir,
+                                                   self.config["logging"]["raw_assistant_conversation"])
+        with open(assistant_conversation_file, "w", encoding="utf-8") as f:
             f.write("\n".join(self.assistant.get_all_messages()))
         self.logger.info(f"Raw assistant conversation saved to {assistant_conversation_file}.")
+        self.video_player.stop_video()
 
 
 if __name__ == "__main__":
     # Pretest flag
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--pretest", action="store_true", help="Running pretest program")
+    argparser.add_argument("--mode", choices=["terminal", "interactive"], default="interactive")
     arguments = argparser.parse_args()
     # Main program loop
-    adaptive_conversational_agent = AdaptiveCA(text_only=False)
+    adaptive_conversational_agent = AdaptiveCA(text_only=arguments.mode == "terminal")
     if arguments.pretest:
         adaptive_conversational_agent.run_pretest_program()
     else:
