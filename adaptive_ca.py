@@ -7,7 +7,7 @@ from tool_functions import (generate_feedback_pretest_function_json, select_ques
                             generate_feedback_function_json, simplify_question_function_json)
 
 from multimedia.TTS import TTSClient
-from multimedia.STT import STTClient
+from multimedia.STT import STTStreamingClient
 from multimedia.video_player import VideoPlayer
 import yaml
 import time
@@ -108,11 +108,18 @@ class AdaptiveCA:
         os.makedirs(tts_log_dir)
         os.makedirs(stt_log_dir)
         # Init TTS, STT client, and video player to be used later
-        self.tts_client = TTSClient(tts_private_key_path=self.config["private_key_path"]["GoogleTTS"],
-                                    output_dir=tts_log_dir, logger=self.logger)
-        self.stt_client = STTClient(stt_private_key_path=self.config["private_key_path"]["GoogleSTT"],
-                                    output_dir=stt_log_dir, logger=self.logger)
-        self.video_player = VideoPlayer(full_screen=True, logger=self.logger)
+        self.tts_client = TTSClient(
+            tts_private_key_path=self.config["private_key_path"]["GCS_TTS"],
+            output_dir=tts_log_dir,
+            logger=self.logger)
+        self.stt_client = STTStreamingClient(
+            gcs_private_key_path=self.config["private_key_path"]["GCS_STT"],
+            gcs_project_id=self.config["gcs_project_id"],
+            max_start_timeout=self.config["stt_settings"]["max_start_timeout"],
+            max_pause_duration=self.config["stt_settings"]["max_pause_duration"],
+            output_dir=stt_log_dir,
+            logger=self.logger)
+        self.video_player = VideoPlayer(full_screen=False, logger=self.logger)
 
     def _retrieve_episode_content(self):
         self.logger.info("Retrieving episode's content...")
@@ -175,11 +182,9 @@ class AdaptiveCA:
 
         # Playing idle video while getting response
         self.video_player.play_video_non_blocking(self.video_path_list["idle"], stop_when_finished=False)
-        response = self.stt_client.speech_to_text(self.config["stt_settings"]["max_recording_duration"])
+        response = self.stt_client.speech_to_text()
         self.video_player.pause_video()
 
-        if response:
-            response = response[0]
         self.logger.info(f"Response: {response}")
         return response
 
@@ -231,7 +236,8 @@ class AdaptiveCA:
         def simplify_question(question):
             # Template to simplify question
             simplified_generation_msg = (f"The child couldn't answer the previous question, please give me a "
-                                         f"simplified version of '{question}'")
+                                         f"simplified version of '{question}'. The simplified question must be a "
+                                         f"yes/no question or a question with multiple choices")
             feedback_msg, json_tool_responses = self.assistant.converse(simplified_generation_msg,
                                                                         tools=[simplify_question_function_json])
             return feedback_msg, json_tool_responses
@@ -359,8 +365,6 @@ class AdaptiveCA:
         # Adaptive learning loop
         self.logger.info("Begin adaptive learning loop")
         self.logger.info("=" * 50)
-        pre_adaptive_loop_msg = "Let's begin learning some science concepts presented in the story!"
-        self.speak(pre_adaptive_loop_msg)
         self.assistant.converse(("Now you will be presented with a transcript from an "
                                  "animation made to help children learn science concepts. The dialogue will be "
                                  "divided into multiple parts, with each part focusing on a science concept. "

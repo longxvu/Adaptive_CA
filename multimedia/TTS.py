@@ -10,8 +10,11 @@ import shutil
 
 import playsound
 import os
+import logging
 from google.cloud import texttospeech
 from google.oauth2 import service_account
+from google.api_core.retry import Retry
+from utils import is_gcs_retryable
 
 
 class TTSClient:
@@ -30,29 +33,33 @@ class TTSClient:
         )
 
         self.logger = logger
+        if not self.logger:
+            self.logger = logging.getLogger(__name__)
         self.output_dir = output_dir
         self.file_idx = 0
+        # If retrying, wait for 0.5 seconds, then keep retrying with duration * 2 (max of 4 seconds between retry)
+        self.gcs_retry_policy = Retry(predicate=is_gcs_retryable, initial=0.5, maximum=4, timeout=60)
 
     def text_to_speech(self, text):
+        # Handle empty input
+        if not text.strip():
+            self.logger.debug("Empty TTS input")
+            return
         synthesis_input = texttospeech.SynthesisInput(text=text)
-        try:
-            response = self.client.synthesize_speech(
-                input=synthesis_input, voice=self.voice, audio_config=self.audio_config
-            )
-            file_path = os.path.join(self.output_dir, f"{self.file_idx:03}.wav")
-            with open(file_path, "wb") as out:
-                out.write(response.audio_content)
-                if self.logger:
-                    self.logger.debug(f'Audio content written to file "{file_path}"')
-            self.file_idx += 1
-            playsound.playsound(file_path)
-        except Exception as e:
+        response = self.client.synthesize_speech(
+            input=synthesis_input, voice=self.voice, audio_config=self.audio_config,
+            retry=self.gcs_retry_policy
+        )
+        file_path = os.path.join(self.output_dir, f"{self.file_idx:03}.wav")
+        with open(file_path, "wb") as out:
+            out.write(response.audio_content)
             if self.logger:
-                self.logger.error(e)
-            else:
-                print(e)
+                self.logger.debug(f'Audio content written to file "{file_path}"')
+        self.file_idx += 1
+        playsound.playsound(file_path)
 
 
 if __name__ == "__main__":
-    tts_client = TTSClient()
-    tts_client.text_to_speech("Sup gang how's it hanging?")
+    tts_client = TTSClient(output_dir="tmp")
+    tts_client.text_to_speech("")
+    tts_client.text_to_speech("Nice try! Keep thinking about what a magnifying glass helps us do.")

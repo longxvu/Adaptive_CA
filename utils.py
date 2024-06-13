@@ -1,6 +1,7 @@
 import json
 import os
 from openai import OpenAI
+from google.api_core import exceptions
 
 
 def show_json(obj):
@@ -51,8 +52,22 @@ def exception_logger(func):
         except Exception as e:
             self = args[0]
             print(e)
-            self.logger.error(repr(e))
+            # Should log all exception, even nested one
+            self.logger.exception(e)
     return inner
+
+
+_GCS_RETRIABLE_TYPES = (
+   exceptions.TooManyRequests,  # 429
+   exceptions.InternalServerError,  # 500
+   exceptions.BadGateway,  # 502
+   exceptions.ServiceUnavailable,  # 503
+)
+
+
+def is_gcs_retryable(exc):
+    # Check if exception thrown is one of the defined exception above
+    return isinstance(exc, _GCS_RETRIABLE_TYPES)
 
 
 def generate_question_configuration(num_questions, difficulty_weights=None, max_score_answer=10):

@@ -2,11 +2,13 @@ childID: 0001
 
 private_key_path:
   OpenAI: keys/.api_key
-  GoogleSTT: keys/stt-private-key.json
-  GoogleTTS: keys/tts-private-key.json
+  GCS_TTS: keys/tts-private-key.json
+  GCS_STT: keys/stt-private-key.json
 
 OpenAI_assistant:
   id: asst_ZNz4lbi6z8bpKkE6APKdrpQ8
+
+gcs_project_id: emerald-trilogy-422704-h7
 
 logging:
   logging_dir: running_logs/
@@ -37,5 +39,7 @@ video_settings:
   max_playing_duration: 5
 
 stt_settings:
-  # Maximum time to record child's response, currently at 5 second only
-  max_recording_duration: 5
+  # If there's no response, the program will wait for max_start_timeout after terminating
+  max_start_timeout: 7
+  # If there's speech activity and there's no more speech after max_pause_duration, the program will terminate
+  max_pause_duration: 5
