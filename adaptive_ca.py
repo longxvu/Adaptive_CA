@@ -306,7 +306,8 @@ class AdaptiveCA:
             # Template to simplify question
             simplified_generation_msg = (f"The child couldn't answer the previous question, please give me a "
                                          f"simplified version of '{question}'. The simplified question must be a "
-                                         f"yes/no question or a question with multiple choices")
+                                         f"yes/no question or a question with multiple choices and must be different"
+                                         f"from the original question.")
             feedback_msg, json_tool_responses = self.assistant.converse(simplified_generation_msg,
                                                                         tools=[simplify_question_function_json])
             return feedback_msg, json_tool_responses

@@ -118,7 +118,8 @@ simplify_question_function_json = {
         "properties": {
             "question": {
                 "type": "string",
-                "description": "The simplified question that is a yes/no or a multiple choice question."
+                "description": "The simplified question that is a yes/no or a multiple choice question. Simplified "
+                               "question must be different from the original question."
             }
         },
         "required": ["question"]
