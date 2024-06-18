@@ -1,45 +1,54 @@
 childID: 0001
 
 private_key_path:
-  OpenAI: keys/.api_key
-  GCS_TTS: keys/tts-private-key.json
-  GCS_STT: keys/stt-private-key.json
+    OpenAI: keys/.api_key
+    GCS_TTS: keys/tts-private-key.json
+    GCS_STT: keys/stt-private-key.json
 
 OpenAI_assistant:
-  id: asst_ZNz4lbi6z8bpKkE6APKdrpQ8
+    id: asst_ZNz4lbi6z8bpKkE6APKdrpQ8
 
 gcs_project_id: emerald-trilogy-422704-h7
 
 logging:
-  logging_dir: running_logs/
-  stt_log_dir: child_stt/
-  tts_log_dir: assistant_tts/
-  assistant_log_file: assistant_info.log
-  debug_log_file: program_info.log
-  pretest_result: pretest_result.txt
-  learning_result: learning_result.txt
-  raw_assistant_conversation: raw_conversation.txt
+    logging_dir: running_logs/
+    stt_log_dir: child_stt/
+    tts_log_dir: assistant_tts/
+    assistant_log_file: assistant_info.log
+    debug_log_file: program_info.log
+    learning_result: learning_result.xlsx
+    raw_assistant_conversation: raw_conversation.txt
 
-episode:
-  pretest_file: transcripts/lucky_shirt_pre_test.xlsx
-  transcript_file: transcripts/lucky_shirt_base.xlsx
-  question_bank: transcripts/lucky_shirt_question_bank.xlsx
-  idle_video_file: videos/rosita-idle.mp4
-  lip_lap_video_file: videos/rosita-lip-flap.mp4
-  # video_directory should contains 01_episode.mp4, 02_episode.mp4, etc.
-  video_directory: videos/lucky_shirt/
+episode_files:
+    text:
+        base_dir: transcripts/lucky_shirt/
+        pretest: lucky_shirt_pre_test.xlsx
+        transcript: lucky_shirt_main.xlsx
+        question_bank: lucky_shirt_question_bank.xlsx
+        warmups: lucky_shirt_warmups.xlsx
+    misc_videos:
+        base_dir: videos/
+        idle: rosita-idle.mp4
+        lip_flap: rosita-lip-flap.mp4
+    # video_directory should contains 01_episode.mp4, 02_episode.mp4, etc.
+    episode_videos:
+        base_dir: videos/lucky_shirt/
+        intro: intro.mp4
+        outro: outro.mp4
 
 video_settings:
-  # Maximum number of videos to test, setting this to number of videos available or large number (99) to test all videos
-  max_videos: 2
-  # Default is 1 (meaning 01_episode.mp4 will be played from the start). For example, if you want to test starting from
-  # 05_episode.mp4, you should set start_episode to 5
-  start_episode: 1
-  # Maximum duration to play in a videos, setting this to a large number (9999) to play full videos
-  max_playing_duration: 5
+    # Playing in fullscreen
+    fullscreen: True
+    # Maximum number of videos to test, setting this to number of videos available or large number (99) to test all videos
+    max_videos: 2
+    # Default is 1 (meaning 01_episode.mp4 will be played from the start). For example, if you want to test starting from
+    # 05_episode.mp4, you should set start_episode to 5
+    start_episode: 1
+    # Maximum duration to play in a videos, setting this to a large number (9999) to play full videos
+    max_playing_duration: 5
 
 stt_settings:
-  # If there's no response, the program will wait for max_start_timeout after terminating
-  max_start_timeout: 7
-  # If there's speech activity and there's no more speech after max_pause_duration, the program will terminate
-  max_pause_duration: 5
+    # If there's no response, the program will wait for max_start_timeout after terminating
+    max_start_timeout: 7
+    # If there's speech activity and there's no more speech after max_pause_duration, the program will terminate
+    max_pause_duration: 4

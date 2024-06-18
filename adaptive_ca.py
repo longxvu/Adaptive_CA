@@ -1,4 +1,6 @@
 import os
+import shutil
+
 from openai import OpenAI
 from assistant import GPTAssistant
 import pandas as pd
@@ -21,6 +23,7 @@ class AdaptiveCA:
             self.config = yaml.safe_load(f)
         # Mainly for testing. I/O will be through console
         self.text_IO = text_only
+        self.learning_history = {}
 
         self._init_logging()
         self._sanity_check()
@@ -64,17 +67,22 @@ class AdaptiveCA:
 
     def _sanity_check(self):
         self.logger.info("Checking files...")
-        # Private keys + all episode pretest + transcript
-        targets = list(self.config["private_key_path"].values()) + list(self.config["episode"].values())
+        # Add private keys, all episodes content file to targets to check
+        targets = list(self.config["private_key_path"].values())
+        for category in self.config["episode_files"].values():
+            root_dir = category.get("base_dir", "")
+            targets.extend([os.path.join(root_dir, category[file]) for file in category if file != "base_dir"])
         # Videos check
         # Keeping video_idx at 1
         self.start_video_idx = self.config["video_settings"]["start_episode"]
         self.end_video_idx = self.start_video_idx + self.config["video_settings"]["max_videos"]
+        episode_root = self.config["episode_files"]["episode_videos"]["base_dir"]
         for video_idx in range(self.start_video_idx, self.end_video_idx):
-            targets.append(os.path.join(self.config["episode"]["video_directory"], f"{video_idx:02}_episode.mp4"))
+            targets.append(os.path.join(episode_root, f"{video_idx:02}_episode.mp4"))
 
         num_missing = 0
         for target_file in targets:
+            self.logger.debug(f"Checking {target_file}...")
             if not os.path.exists(target_file):
                 num_missing += 1
                 self.logger.info(f"{target_file} doesn't exist")
@@ -119,26 +127,42 @@ class AdaptiveCA:
             max_pause_duration=self.config["stt_settings"]["max_pause_duration"],
             output_dir=stt_log_dir,
             logger=self.logger)
-        self.video_player = VideoPlayer(full_screen=False, logger=self.logger)
+        self.video_player = VideoPlayer(full_screen=self.config["video_settings"]["fullscreen"], logger=self.logger)
 
     def _retrieve_episode_content(self):
         self.logger.info("Retrieving episode's content...")
+        # Here we define a bunch of file root + file path
+        files = {}
+        for category, sub_files in self.config["episode_files"].items():
+            root_dir = sub_files.get("base_dir", "")
+            files[category] = {subcategory: os.path.join(root_dir, sub_files[subcategory])
+                               for subcategory in sub_files if subcategory != "base_dir"}
+
         # Retrieving pretest file
-        df = pd.read_excel(self.config["episode"]["pretest_file"], usecols=["question", "level", "answer"])
+        df = pd.read_excel(files["text"]["pretest"], usecols=["question", "level", "answer"])
         self.pretest = df.to_dict(orient="records")
         self.logger.info(
-            f"Retrieved {len(self.pretest)} pretest questions from {self.config['episode']['pretest_file']}")
+            f"Retrieved {len(self.pretest)} pretest questions from {files['text']['pretest']}"
+        )
+
+        # Retrieving warmup questions
+        df = pd.read_excel(files["text"]["warmups"], usecols=["question"])
+        self.warmup_questions = df["question"].tolist()
+        self.logger.info(
+            f"Retrieved {len(self.warmup_questions)} warmup questions from {files['text']['warmups']}"
+        )
 
         # Retrieving transcript file
-        df = pd.read_excel(self.config["episode"]["transcript_file"], usecols=["text", "question"])
+        df = pd.read_excel(files["text"]["transcript"], usecols=["text", "question"])
         self.dialogues = df.to_dict(orient="records")
         # For now don't retrieve question without any dialogue (e.g. in town_picnic_base.xlsx)
         self.dialogues = [dialogue for dialogue in self.dialogues if dialogue["text"].strip()]
-        self.logger.info(f"Retrieved {len(self.dialogues)} parts of episode with base questions from"
-                         f" {self.config['episode']['transcript_file']}")
+        self.logger.info(
+            f"Retrieved {len(self.dialogues)} parts of episode with base questions from {files['text']['transcript']}"
+        )
 
         # Retrieving question banks
-        df = pd.read_excel(self.config["episode"]["question_bank"])
+        df = pd.read_excel(files["text"]["question_bank"])
         df = df.sort_values(by=["id_text", "level"], ascending=[True, False])  # Some hacks here: shallow -> int -> deep
         self.question_banks = []
         for dict_item in df.groupby("id_text").agg(list).to_dict(orient="records"):
@@ -146,18 +170,21 @@ class AdaptiveCA:
             for question, level in zip(dict_item["question"], dict_item["level"]):
                 current_questions.append({"question": question, "level": level.upper()})
             self.question_banks.append(current_questions)
-        self.logger.info(f"Retrieved {len(df)} questions from {self.config['episode']['question_bank']}")
+        self.logger.info(f"Retrieved {len(df)} questions from {files['text']['question_bank']}")
 
         # Retrieving videos file
-        episode_path_list = [os.path.join(self.config["episode"]["video_directory"], f"{video_idx:02}_episode.mp4")
+        episode_path_list = [os.path.join(self.config["episode_files"]["episode_videos"]["base_dir"],
+                                          f"{video_idx:02}_episode.mp4")
                              for video_idx in range(self.start_video_idx, self.end_video_idx)]
         self.video_path_list = {
             "episodes": episode_path_list,
-            "idle": self.config["episode"]["idle_video_file"],
-            "lip_flap": self.config["episode"]["lip_lap_video_file"],
+            "idle": files["misc_videos"]["idle"],
+            "lip_flap": files["misc_videos"]["lip_flap"],
+            "intro": files["episode_videos"]["intro"],
+            "outro": files["episode_videos"]["outro"]
         }
         self.logger.info(f"Retrieved {len(self.video_path_list['episodes'])} videos from"
-                         f" {self.config['episode']['video_directory']}")
+                         f" {self.config['episode_files']['episode_videos']['base_dir']}")
 
     def get_assistant_info(self):
         assistant_data = self.client.beta.assistants.retrieve(self.assistant.id).model_dump()
@@ -193,37 +220,79 @@ class AdaptiveCA:
         answer = self.get_response()
         return answer
 
+    def save_learning_history(self):
+        learning_result_file = os.path.join(self.logging_root_dir, self.config["logging"]["learning_result"])
+        with pd.ExcelWriter(learning_result_file) as writer:
+            for section in self.learning_history:
+                df = pd.DataFrame(self.learning_history[section])
+                # Essentially checking if learning history is nested (happens for episode learning history)
+                if isinstance(self.learning_history[section][0], list):
+                    df = df.stack().apply(pd.Series)
+                df.to_excel(writer, sheet_name=section)
+        self.logger.info(f"Learning history saved to {learning_result_file}.")
+
+    def save_raw_conversation(self):
+        assistant_convo_file = os.path.join(self.logging_root_dir, self.config["logging"]["raw_assistant_conversation"])
+        with open(assistant_convo_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(self.assistant.get_all_messages()))
+        self.logger.info(f"Raw assistant conversation saved to {assistant_convo_file}.")
+
+    def run_warmup(self):
+        self.logger.info("Begin warmups")
+        self.assistant.converse("We will now begin by showing a warmup video and asking a few warmup questions")
+        if not self.text_IO:
+            self.video_player.play_video(self.video_path_list["intro"],
+                                         max_duration=self.config["video_settings"]["max_playing_duration"],
+                                         stop_when_finished=False)
+        warmup_learning_history = []
+        for question in self.warmup_questions:
+            answer = self.ask_question(question)
+            warmup_feedback_msg = (f"Here's a warmup question '{question}'. The child answer is '{answer}'. Please "
+                                   f"give the child feedback based on their answer.")
+            _, json_responses = self.assistant.converse(warmup_feedback_msg,
+                                                        tools=[generate_feedback_pretest_function_json])
+            feedback = json_responses[0]["feedback"]
+            self.speak(feedback)
+            warmup_learning_history.append({
+                "question": question,
+                "answer": answer,
+                "feedback": feedback
+            })
+        self.learning_history["warmup"] = warmup_learning_history
+
     def run_pre_test(self):
         self.assistant.converse("Now I will begin asking the child a few pretest questions, then you will give me"
                                 "feedbacks based on the child's answer")
+        pretest_learning_history = []
         for pretest_eval in self.pretest:
             pretest_question, pretest_answer = pretest_eval["question"], pretest_eval["answer"]
             question_level = pretest_eval["level"]
             # I/O stuffs
-            child_answer = self.ask_question(pretest_question)
-            pretest_eval["child_answer"] = child_answer
+            answer = self.ask_question(pretest_question)
 
             # Get feedback from GPT
             pretest_msg = (f"Here's a {question_level} pretest question: {pretest_question}, and a sample "
-                           f"answer: {pretest_answer}. Here's the child's answer: {child_answer}. Please give the "
+                           f"answer: {pretest_answer}. Here's the child's answer: {answer}. Please give the "
                            "child a feedback based on their answer.")
             responses, json_response = self.assistant.converse(pretest_msg,
                                                                tools=[generate_feedback_pretest_function_json])
-
-            feedback, accuracy = json_response[0]["feedback"], json_response[0]["accuracy"]
-            pretest_eval["accuracy"] = accuracy
-            pretest_eval["feedback"] = feedback
-
+            feedback = json_response[0]["feedback"]
             self.speak(feedback)
+            pretest_learning_history.append({
+                "question": pretest_question,
+                "answer": answer,
+                "feedback": feedback
+            })
+        self.learning_history["pretest"] = pretest_learning_history
 
     def adaptive_learning_loop(self):
-        def generate_question(learning_history):
-            # Template for generating question
-            question_gen_msg = (f"Here's the child learning's history: {learning_history}, please "
-                                f"generate a question based on the child's learning history and the story.")
-            feedback_msg, json_tool_responses = self.assistant.converse(question_gen_msg,
-                                                                        tools=[generate_question_function_json])
-            return feedback_msg, json_tool_responses
+        # def generate_question(learning_history):
+        #     # Template for generating question
+        #     question_gen_msg = (f"Here's the child learning's history: {learning_history}, please "
+        #                         f"generate a question based on the child's learning history and the story.")
+        #     feedback_msg, json_tool_responses = self.assistant.converse(question_gen_msg,
+        #                                                                 tools=[generate_question_function_json])
+        #     return feedback_msg, json_tool_responses
 
         def generate_feedback(question, answer):
             # Template function to generate feedback from child's answer
@@ -322,18 +391,23 @@ class AdaptiveCA:
                 # We also check for if it's currently the last questions
                 if next_q_level == last_q_level == 0 or next_q_level == last_q_level == 2 or q_id == max_questions - 1:
                     self.speak(evaluation, explanation)
+                    learning_history_dict["feedback"] = f"{evaluation} {explanation}"
                     break
                 # Simplifying previous asked question
-                if next_q_level < last_q_level:     # wrong answer -> simplify
+                if next_q_level < last_q_level:  # wrong answer -> simplify
                     self.speak(evaluation, transition)
+                    learning_history_dict["feedback"] = f"{evaluation} {transition}"
                     feedback, json_responses = simplify_question(generated_question)
                 else:  # Harder question only rely on learning history
                     self.speak(evaluation, explanation, transition)
+                    learning_history_dict["feedback"] = f"{evaluation} {explanation} {transition}"
                     # feedback, json_responses = generate_question(current_learning_history)
                     feedback, json_responses = select_question(current_question_bank, question_levels[next_q_level],
                                                                current_learning_history)
             # Add question answer log
             episode_learning_history.append(learning_history_log)
+
+        self.learning_history["episode"] = episode_learning_history
         return episode_learning_history
 
     @utils.exception_logger
@@ -343,25 +417,12 @@ class AdaptiveCA:
         self.speak("Let's begin with a pretest!")
         self.run_pre_test()
         self.speak("You're now done with the pretest!")
-        # Now save the pretest learning results
-        pretest_result_file = os.path.join(self.logging_root_dir, self.config["logging"]["pretest_result"])
-        saving_fields = ["child_answer", "accuracy", "feedback"]
-        learning_history = []
-        for pretest_item in self.pretest:
-            learning_history.append("\n".join([str(pretest_item[field]) for field in saving_fields]))
-        # Learning result logging
-        with open(pretest_result_file, "w", encoding="utf-8") as f:
-            f.write("\n\n".join(learning_history))
-        self.logger.info(f"Pretest response is saved to {pretest_result_file}.")
-        # Saving raw convo file
-        assistant_convo_file = os.path.join(self.logging_root_dir, self.config["logging"]["raw_assistant_conversation"])
-        with open(assistant_convo_file, "w", encoding="utf-8") as f:
-            f.write("\n".join(self.assistant.get_all_messages()))
-        self.logger.info(f"Raw assistant conversation saved to {assistant_convo_file}.")
-        self.video_player.stop_video()
 
     @utils.exception_logger
-    def run_adaptive_learning_program(self):
+    def run_adaptive_learning_program(self, skip_warmup=False):
+        # Warmup video + question
+        if not skip_warmup:
+            self.run_warmup()
         # Adaptive learning loop
         self.logger.info("Begin adaptive learning loop")
         self.logger.info("=" * 50)
@@ -369,28 +430,10 @@ class AdaptiveCA:
                                  "animation made to help children learn science concepts. The dialogue will be "
                                  "divided into multiple parts, with each part focusing on a science concept. "
                                  "Your goal is to help the child learn science knowledge from the stories."))
-        learning_history_log = self.adaptive_learning_loop()
-
+        self.adaptive_learning_loop()
         # Post adaptive loop message
         post_adaptive_loop_msg = "Congratulations! Hope you have fun learning something new today!"
         self.speak(post_adaptive_loop_msg)
-        # Writing to a log file
-        saving_fields = ["question", "level", "rationale", "answer", "accuracy"]
-        learning_log_file = os.path.join(self.logging_root_dir, self.config["logging"]["learning_result"])
-        with open(learning_log_file, "w", encoding="utf-8") as f:
-            for learning_part in learning_history_log:
-                for learning_question in learning_part:
-                    f.write("\n".join([str(learning_question[field]) for field in saving_fields]))
-                    f.write("\n-\n")
-                f.write("=\n")
-        self.logger.info(f"Learning history saved to {learning_log_file}.")
-        # Writing raw OpenAI's conversation
-        assistant_conversation_file = os.path.join(self.logging_root_dir,
-                                                   self.config["logging"]["raw_assistant_conversation"])
-        with open(assistant_conversation_file, "w", encoding="utf-8") as f:
-            f.write("\n".join(self.assistant.get_all_messages()))
-        self.logger.info(f"Raw assistant conversation saved to {assistant_conversation_file}.")
-        self.video_player.stop_video()
 
 
 if __name__ == "__main__":
@@ -398,10 +441,15 @@ if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
     argparser.add_argument("--pretest", action="store_true", help="Running pretest program")
     argparser.add_argument("--mode", choices=["terminal", "interactive"], default="interactive")
+    argparser.add_argument("--skip-warmup", action="store_true", help="If present, skip warmup section")
     arguments = argparser.parse_args()
     # Main program loop
     adaptive_conversational_agent = AdaptiveCA(text_only=arguments.mode == "terminal")
     if arguments.pretest:
         adaptive_conversational_agent.run_pretest_program()
     else:
-        adaptive_conversational_agent.run_adaptive_learning_program()
+        adaptive_conversational_agent.run_adaptive_learning_program(skip_warmup=arguments.skip_warmup)
+    # Save learning state information after running
+    adaptive_conversational_agent.save_learning_history()
+    adaptive_conversational_agent.save_raw_conversation()
+    adaptive_conversational_agent.video_player.stop_video()
