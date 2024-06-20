@@ -199,7 +199,12 @@ class AdaptiveCA:
             # Playing lip flap video while TTS
             self.video_player.play_video_non_blocking(self.video_path_list["lip_flap"], stop_when_finished=False)
             self.tts_client.text_to_speech(texts)
-            self.video_player.pause_video()
+            # After speaking, we need to buffer between processing time
+            self.video_player.play_video_non_blocking(self.video_path_list["idle"], stop_when_finished=False)
+
+    @utils.multithread
+    def speak_non_block(self, *texts):
+        self.speak(*texts)
 
     def get_response(self):
         if self.text_IO:
@@ -210,7 +215,7 @@ class AdaptiveCA:
         # Playing idle video while getting response
         self.video_player.play_video_non_blocking(self.video_path_list["idle"], stop_when_finished=False)
         response = self.stt_client.speech_to_text()
-        self.video_player.pause_video()
+        # self.video_player.pause_video()
 
         self.logger.info(f"Response: {response}")
         return response
@@ -293,7 +298,7 @@ class AdaptiveCA:
         #     feedback_msg, json_tool_responses = self.assistant.converse(question_gen_msg,
         #                                                                 tools=[generate_question_function_json])
         #     return feedback_msg, json_tool_responses
-
+        @utils.time_logger(self.logger)
         def generate_feedback(question, answer):
             # Template function to generate feedback from child's answer
             feedback_generation_msg = (f"The question is: '{question}'. Here's the child's answer: '{answer}'. "
@@ -302,6 +307,7 @@ class AdaptiveCA:
                                                                         tools=[generate_feedback_function_json])
             return feedback_msg, json_tool_responses
 
+        @utils.time_logger(self.logger)
         def simplify_question(question):
             # Template to simplify question
             simplified_generation_msg = (f"The child couldn't answer the previous question, please give me a "
@@ -312,6 +318,7 @@ class AdaptiveCA:
                                                                         tools=[simplify_question_function_json])
             return feedback_msg, json_tool_responses
 
+        @utils.time_logger(self.logger)
         def select_question(question_banks, q_level, learning_history):
             question_selection_msg = (f"Here's the child's learning history: {learning_history}. Select a {q_level} "
                                       f"question from the list of questions: {question_banks}.")
@@ -328,17 +335,18 @@ class AdaptiveCA:
             dialogue_text, base_question = dialogue["text"], dialogue["question"]
             current_question_bank = self.question_banks[idx]
             self.logger.info("Video playing...")
-            if self.text_IO:  # Debugging
-                self.logger.info(dialogue_text[:200] + "...")
-            else:
-                self.video_player.play_video(self.video_path_list["episodes"][idx],
-                                             max_duration=self.config["video_settings"]["max_playing_duration"],
-                                             stop_when_finished=False)
+            # Play the episode video in the background
+            parallel_thread = self.video_player.play_video_non_blocking(
+                self.video_path_list["episodes"][idx],
+                max_duration=self.config["video_settings"]["max_playing_duration"],
+                stop_when_finished=False,
+            )
             # Learning history for this part only
             current_learning_history = []  # learning history sent to OpenAI
             learning_history_log = []  # logging for everything
 
             # Story conversing
+            self.logger.info("Conversing current story to OpenAI")
             question_generation_msg = (f"Here's the current story: {dialogue_text}. | \n"
                                        f"Through this story, we will assist the child in learning some new science "
                                        f"concepts.")
@@ -350,6 +358,7 @@ class AdaptiveCA:
                 "level": "BASE",
                 "rationale": "Base question to start out"
             }]
+            self.logger.info("Conversing done!")
 
             # Ask maximum 3 questions
             max_questions = 3
@@ -362,6 +371,7 @@ class AdaptiveCA:
                 level = json_responses[0]["level"] if "level" in json_responses[0] else "SIMPLIFIED"
                 rationale = json_responses[0]["rationale"] if "rationale" in json_responses[
                     0] else "Simplifying previous question"
+                parallel_thread.join()
                 child_answer = self.ask_question(generated_question)
                 feedback, json_responses = generate_feedback(generated_question, child_answer)
                 accuracy, evaluation, explanation, transition = [json_responses[0][obj] for obj in [
@@ -391,20 +401,21 @@ class AdaptiveCA:
                 # If we have two rights (or wrongs) in a row, evaluation + exit
                 # We also check for if it's currently the last questions
                 if next_q_level == last_q_level == 0 or next_q_level == last_q_level == 2 or q_id == max_questions - 1:
-                    self.speak(evaluation, explanation)
+                    parallel_thread = self.speak_non_block(evaluation, explanation)
                     learning_history_dict["feedback"] = f"{evaluation} {explanation}"
                     break
                 # Simplifying previous asked question
                 if next_q_level < last_q_level:  # wrong answer -> simplify
-                    self.speak(evaluation, transition)
+                    parallel_thread = self.speak_non_block(evaluation, transition)
                     learning_history_dict["feedback"] = f"{evaluation} {transition}"
                     feedback, json_responses = simplify_question(generated_question)
                 else:  # Harder question only rely on learning history
-                    self.speak(evaluation, explanation, transition)
+                    parallel_thread = self.speak_non_block(evaluation, explanation, transition)
                     learning_history_dict["feedback"] = f"{evaluation} {explanation} {transition}"
                     # feedback, json_responses = generate_question(current_learning_history)
                     feedback, json_responses = select_question(current_question_bank, question_levels[next_q_level],
                                                                current_learning_history)
+            parallel_thread.join()
             # Add question answer log
             episode_learning_history.append(learning_history_log)
 

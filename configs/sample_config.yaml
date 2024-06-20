@@ -45,7 +45,7 @@ video_settings:
     # 05_episode.mp4, you should set start_episode to 5
     start_episode: 1
     # Maximum duration to play in a videos, setting this to a large number (9999) to play full videos
-    max_playing_duration: 5
+    max_playing_duration: 10
 
 stt_settings:
     # If there's no response, the program will wait for max_start_timeout after terminating

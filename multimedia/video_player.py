@@ -13,11 +13,13 @@ class VideoPlayer:
         self.instance.log_unset()
 
     def play_video(self, video_path, max_duration=None, stop_when_finished=True):
+        # If there's any other video playing, we pause it
+        self.player.pause()
         self.player.set_mrl(video_path)
         self.player.play()
 
         time.sleep(0.1)
-        playing_states = {1, 2, 3, 4}
+        playing_states = {1, 2, 3, 4}  # TODO: Should we leave the pause state outside?
         duration = self.player.get_length() / 1000
 
         logging_message = f"Playing {video_path} for {int(duration // 60)}m{int(duration % 60)}s"
@@ -38,8 +40,8 @@ class VideoPlayer:
             self.player.pause()
 
     def play_video_non_blocking(self, video_path, max_duration=None, stop_when_finished=True):
-        video_player_thread = threading.Thread(target=self.play_video, args=(video_path, max_duration,
-                                                                             stop_when_finished))
+        video_player_thread = threading.Thread(target=self.play_video,
+                                               args=(video_path, max_duration, stop_when_finished))
         video_player_thread.start()
         return video_player_thread
 

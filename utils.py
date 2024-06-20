@@ -1,5 +1,7 @@
 import json
 import os
+import threading
+import time
 from openai import OpenAI
 from google.api_core import exceptions
 
@@ -55,6 +57,29 @@ def exception_logger(func):
             # Should log all exception, even nested one
             self.logger.exception(e)
     return inner
+
+
+def time_logger(logger=None):
+    def middle(func):
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            result = func(*args, **kwargs)
+            log_msg = f"Function ({func.__name__}) took {(time.time() - start):.2f}s"
+            if logger:
+                logger.debug(log_msg)
+            else:
+                print(log_msg)
+            return result
+        return wrapper
+    return middle
+
+
+def multithread(func):
+    def wrapper(*args, **kwargs):
+        t = threading.Thread(target=func, args=args, kwargs=kwargs)
+        t.start()
+        return t
+    return wrapper
 
 
 _GCS_RETRIABLE_TYPES = (
