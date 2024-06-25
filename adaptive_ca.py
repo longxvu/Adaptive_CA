@@ -15,6 +15,7 @@ import yaml
 import time
 import logging
 import argparse
+import glob
 
 
 class AdaptiveCA:
@@ -73,11 +74,18 @@ class AdaptiveCA:
             root_dir = category.get("base_dir", "")
             targets.extend([os.path.join(root_dir, category[file]) for file in category if file != "base_dir"])
         # Videos check
-        # Keeping video_idx at 1
+        # Keeping video_idx starting at 1. idx have this format: [start, end)
         self.start_video_idx = self.config["video_settings"]["start_episode"]
-        self.end_video_idx = self.start_video_idx + self.config["video_settings"]["max_videos"]
+        possible_video_ep = glob.glob(os.path.join(self.config["episode_files"]["episode_videos"]["base_dir"],
+                                                   "*_episode*"))
+        self.end_video_idx = min(self.start_video_idx + self.config["video_settings"]["max_videos"],
+                                 len(possible_video_ep) + 1)    # restrict to number of possible video only
+        if self.start_video_idx >= self.end_video_idx:
+            self.logger.error(f"Invalid start_video index: {self.start_video_idx}")
+            exit()
         episode_root = self.config["episode_files"]["episode_videos"]["base_dir"]
-        for video_idx in range(self.start_video_idx, self.end_video_idx):
+        # Check everything
+        for video_idx in range(1, self.end_video_idx):
             targets.append(os.path.join(episode_root, f"{video_idx:02}_episode.mp4"))
 
         num_missing = 0
@@ -175,7 +183,7 @@ class AdaptiveCA:
         # Retrieving videos file
         episode_path_list = [os.path.join(self.config["episode_files"]["episode_videos"]["base_dir"],
                                           f"{video_idx:02}_episode.mp4")
-                             for video_idx in range(self.start_video_idx, self.end_video_idx)]
+                             for video_idx in range(1, self.end_video_idx)]
         self.video_path_list = {
             "episodes": episode_path_list,
             "idle": files["misc_videos"]["idle"],
@@ -336,6 +344,7 @@ class AdaptiveCA:
             current_question_bank = self.question_banks[idx]
             self.logger.info("Video playing...")
             # Play the episode video in the background
+            self.logger.info(f"Playing video: {self.video_path_list['episodes'][idx]}")
             parallel_thread = self.video_player.play_video_non_blocking(
                 self.video_path_list["episodes"][idx],
                 max_duration=self.config["video_settings"]["max_playing_duration"],
@@ -443,7 +452,10 @@ class AdaptiveCA:
                                  "divided into multiple parts, with each part focusing on a science concept. "
                                  "Your goal is to help the child learn science knowledge from the stories."))
         self.adaptive_learning_loop()
-        # Post adaptive loop message
+        # Outro + Post adaptive loop message
+        self.video_player.play_video(self.video_path_list["outro"],
+                                     max_duration=self.config["video_settings"]["max_playing_duration"],
+                                     stop_when_finished=False)
         post_adaptive_loop_msg = "Congratulations! Hope you have fun learning something new today!"
         self.speak(post_adaptive_loop_msg)
 
@@ -460,7 +472,9 @@ if __name__ == "__main__":
     if arguments.pretest:
         adaptive_conversational_agent.run_pretest_program()
     else:
-        adaptive_conversational_agent.run_adaptive_learning_program(skip_warmup=arguments.skip_warmup)
+        skip_warmup = (arguments.skip_warmup or
+                       adaptive_conversational_agent.config["video_settings"]["start_episode"] > 1)
+        adaptive_conversational_agent.run_adaptive_learning_program(skip_warmup=skip_warmup)
     # Save learning state information after running
     adaptive_conversational_agent.save_learning_history()
     adaptive_conversational_agent.save_raw_conversation()
